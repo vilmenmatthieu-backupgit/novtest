@@ -1,0 +1,291 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Snap avec NovSuity</title>
+    <!-- Intégration de Tailwind CSS pour un design moderne -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body {
+            background-color: #111827;
+            color: #F9FAFB;
+            font-family: 'Inter', sans-serif;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            margin: 0;
+            overflow: hidden;
+        }
+        #cameraCanvas {
+            max-width: 100%;
+            border-radius: 0.75rem;
+            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+        }
+        #videoFeed {
+            display: none;
+        }
+    </style>
+    <link rel="stylesheet" href="https://rsms.me/inter/inter.css">
+</head>
+<body class="bg-gray-900 text-gray-100 flex flex-col justify-center items-center p-4">
+ 
+    <div class="w-full max-w-2xl text-center">
+        <h1 class="text-3xl md:text-4xl font-bold mb-2">Snap avec NovSuity</h1>
+        <p id="feedback" class="text-lg text-cyan-400 mb-4 h-8 transition-opacity duration-300">Initialisation de la caméra...</p>
+ 
+        <div class="relative w-full">
+            <canvas id="cameraCanvas" class="bg-gray-800 rounded-xl shadow-lg w-full"></canvas>
+            <!-- Élément HTML pour le cadre, plus fiable que le dessin sur canvas -->
+            <div id="framingGuide" class="absolute top-0 left-0 pointer-events-none" style="border: 6px dashed white;"></div>
+        </div>
+ 
+        <video id="videoFeed" playsinline></video>
+       
+        <!-- Zone pour la description et le prix générés par l'IA -->
+        <div id="aiOutputContainer" class="mt-4 text-left p-4 bg-gray-800 rounded-lg" style="display: none;">
+            <p id="aiDescription" class="text-lg text-gray-300 italic"></p>
+            <p id="aiPriceSuggestion" class="mt-3 text-lg text-cyan-400 font-semibold"></p>
+        </div>
+ 
+        <div class="mt-6">
+            <button id="mainButton" class="px-8 py-3 bg-cyan-600 text-white font-semibold rounded-lg shadow-md hover:bg-cyan-700 focus:outline-none focus:ring-2 focus:ring-cyan-500 focus:ring-opacity-75 transition-transform transform hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed">
+                Valider
+            </button>
+            <div id="confirmContainer" class="hidden space-x-4">
+                <button id="retakeButton" class="px-8 py-3 bg-gray-600 text-white font-semibold rounded-lg shadow-md hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-gray-500 focus:ring-opacity-75 transition-transform transform hover:scale-105">Reprendre</button>
+                <button id="confirmButton" class="px-8 py-3 bg-cyan-600 text-white font-semibold rounded-lg shadow-md hover:bg-cyan-700 focus:outline-none focus:ring-2 focus:ring-cyan-500 focus:ring-opacity-75 transition-transform transform hover:scale-105">Confirmer</button>
+            </div>
+            <button id="downloadButton" class="hidden ml-4 px-8 py-3 bg-green-600 text-white font-semibold rounded-lg shadow-md hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-opacity-75 transition-transform transform hover:scale-105">
+                Télécharger la Photo
+            </button>
+        </div>
+    </div>
+ 
+    <script>
+        const video = document.getElementById('videoFeed');
+        const canvas = document.getElementById('cameraCanvas');
+        const ctx = canvas.getContext('2d', { willReadFrequently: true });
+        const feedback = document.getElementById('feedback');
+        const mainButton = document.getElementById('mainButton');
+        const confirmContainer = document.getElementById('confirmContainer');
+        const retakeButton = document.getElementById('retakeButton');
+        const confirmButton = document.getElementById('confirmButton');
+        const aiOutputContainer = document.getElementById('aiOutputContainer');
+        const aiDescriptionContainer = document.getElementById('aiDescription');
+        const aiPriceContainer = document.getElementById('aiPriceSuggestion');
+        const downloadButton = document.getElementById('downloadButton');
+        const framingGuideElement = document.getElementById('framingGuide');
+ 
+        let finalImageDataUrl = null;
+ 
+        const AppState = {
+            SCANNING: 'scanning',
+            CONFIRMING: 'confirming',
+            GENERATING: 'generating',
+            DONE: 'done'
+        };
+        let currentAppState = AppState.SCANNING;
+ 
+        async function setupCamera() {
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
+                video.srcObject = stream;
+                video.onloadedmetadata = () => {
+                    video.play();
+                    setCanvasDimensions();
+                    requestAnimationFrame(renderLoop);
+                };
+            } catch (error) {
+                console.error("Erreur d'accès à la caméra:", error);
+                feedback.textContent = "Impossible d'accéder à la caméra.";
+                mainButton.disabled = true;
+            }
+        }
+       
+        function setCanvasDimensions() {
+            if (!video.videoWidth) return;
+            const aspectRatio = video.videoWidth / video.videoHeight;
+            const containerWidth = canvas.parentElement.offsetWidth;
+            canvas.width = containerWidth;
+            canvas.height = containerWidth / aspectRatio;
+        }
+ 
+        function renderLoop() {
+            if (currentAppState === AppState.SCANNING) {
+                ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+                updateFramingGuidePosition();
+            }
+            updateUI();
+            requestAnimationFrame(renderLoop);
+        }
+ 
+        function updateUI() {
+            aiOutputContainer.style.display = (currentAppState === AppState.GENERATING || currentAppState === AppState.DONE) ? 'block' : 'none';
+            mainButton.style.display = (currentAppState === AppState.SCANNING || currentAppState === AppState.DONE) ? 'inline-block' : 'none';
+            confirmContainer.style.display = currentAppState === AppState.CONFIRMING ? 'block' : 'none';
+            downloadButton.style.display = 'none';
+            framingGuideElement.style.display = currentAppState === AppState.SCANNING ? 'block' : 'none';
+ 
+            switch (currentAppState) {
+                case AppState.SCANNING:
+                    feedback.textContent = "Centrez le cadre et validez.";
+                    mainButton.textContent = "Valider";
+                    mainButton.disabled = false;
+                    break;
+                case AppState.CONFIRMING:
+                    feedback.textContent = "Validez-vous cette photo ?";
+                    break;
+                case AppState.GENERATING:
+                    feedback.innerHTML = "✨ Analyse par l'IA en cours...";
+                    break;
+                case AppState.DONE:
+                    feedback.textContent = "Description générée !";
+                    mainButton.textContent = "Recommencer";
+                    mainButton.disabled = false;
+                    downloadButton.style.display = 'inline-block';
+                    break;
+            }
+        }
+ 
+        function getFrameRect() {
+            return {
+                width: canvas.width * 0.5,
+                height: canvas.height * 0.8,
+                x: (canvas.width * 0.25),
+                y: (canvas.height * 0.1)
+            };
+        }
+       
+        function updateFramingGuidePosition() {
+            const frameRect = getFrameRect();
+            framingGuideElement.style.width = `${frameRect.width}px`;
+            framingGuideElement.style.height = `${frameRect.height}px`;
+            framingGuideElement.style.top = `${frameRect.y}px`;
+            framingGuideElement.style.left = `${frameRect.x}px`;
+        }
+ 
+        function handleMainButtonClick() {
+            if (currentAppState === AppState.SCANNING) {
+                currentAppState = AppState.CONFIRMING;
+                ctx.drawImage(video, 0, 0, canvas.width, canvas.height); // Figer l'image
+            } else if (currentAppState === AppState.DONE) {
+                resetApp();
+            }
+        }
+       
+        async function generateDescription() {
+            const frameRect = getFrameRect();
+            const tempCanvas = document.createElement('canvas');
+            tempCanvas.width = frameRect.width;
+            tempCanvas.height = frameRect.height;
+            const tempCtx = tempCanvas.getContext('2d');
+            // Dessiner la partie figée du canvas principal
+            tempCtx.drawImage(canvas, frameRect.x, frameRect.y, frameRect.width, frameRect.height, 0, 0, frameRect.width, frameRect.height);
+           
+            const imageDataUrl = tempCanvas.toDataURL('image/jpeg');
+            finalImageDataUrl = imageDataUrl;
+            const base64ImageData = imageDataUrl.split(',')[1];
+ 
+            // --- CONFIGURATION DE LA CLÉ API ---
+            const apiKey = "AIzaSyBPSmq3gmqdUvTkTnPqwpZsk8rkcIf6fNY";
+            // ------------------------------------
+ 
+            if (apiKey === "VOTRE_CLE_API_GEMINI_ICI") {
+                aiDescriptionContainer.textContent = "Erreur : La clé API Gemini n'a pas été configurée.";
+                aiPriceContainer.textContent = "Veuillez l'ajouter dans le code pour activer l'analyse.";
+                currentAppState = AppState.DONE;
+                return;
+            }
+ 
+            const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-05-20:generateCont…${apiKey}`;
+ 
+            const payload = {
+                contents: [{
+                    parts: [
+                        { text: "Analyse cet article de mode d'occasion. Réponds UNIQUEMENT avec un objet JSON valide qui contient deux clés : 'description' (une description courte pour une annonce en ligne) et 'prix' (une fourchette de prix suggérée en euros, ex: '15-20€')." },
+                        { inlineData: { mimeType: "image/jpeg", data: base64ImageData } }
+                    ]
+                }],
+            };
+ 
+            try {
+                const response = await fetch(apiUrl, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                if (!response.ok) throw new Error(`API error: ${response.statusText}`);
+                const result = await response.json();
+                const aiResponseText = result.candidates?.[0]?.content?.parts?.[0]?.text;
+               
+                try {
+                    const cleanedText = aiResponseText.replace(/```json/g, '').replace(/```/g, '').trim();
+                    const parsedData = JSON.parse(cleanedText);
+                    const description = parsedData.description || "Description non disponible.";
+                    const price = parsedData.prix || "Prix non disponible.";
+ 
+                    aiDescriptionContainer.textContent = `"${description}"`;
+                    aiPriceContainer.textContent = `Prix suggéré : ${price}`;
+                } catch (parseError) {
+                    console.error("Erreur de parsing JSON:", parseError);
+                    aiDescriptionContainer.textContent = aiResponseText || "Impossible de générer une réponse.";
+                    aiPriceContainer.textContent = "";
+                }
+ 
+            } catch (error) {
+                console.error("Erreur lors de l'appel à l'API Gemini:", error);
+                aiDescriptionContainer.textContent = "Une erreur est survenue. Veuillez réessayer.";
+                aiPriceContainer.textContent = "";
+            } finally {
+                currentAppState = AppState.DONE;
+            }
+        }
+ 
+        function resetApp() {
+            currentAppState = AppState.SCANNING;
+            aiDescriptionContainer.textContent = '';
+            aiPriceContainer.textContent = '';
+            finalImageDataUrl = null;
+            // Relancer la boucle de rendu pour réactiver la vidéo
+            requestAnimationFrame(renderLoop);
+        }
+       
+        confirmButton.addEventListener('click', async () => {
+            if (currentAppState === AppState.CONFIRMING) {
+                currentAppState = AppState.GENERATING;
+                await generateDescription();
+            }
+        });
+ 
+        retakeButton.addEventListener('click', () => {
+            if (currentAppState === AppState.CONFIRMING) {
+                currentAppState = AppState.SCANNING;
+                // Relancer la boucle de rendu pour réactiver la vidéo
+                requestAnimationFrame(renderLoop);
+            }
+        });
+ 
+        downloadButton.addEventListener('click', () => {
+            if (!finalImageDataUrl) return;
+            const link = document.createElement('a');
+            link.href = finalImageDataUrl;
+            link.download = 'snap-avec-novsuity.jpg';
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+        });
+ 
+        mainButton.addEventListener('click', handleMainButtonClick);
+       
+        window.addEventListener('resize', () => {
+            if (video.srcObject) {
+                setCanvasDimensions();
+            }
+        });
+ 
+        window.addEventListener('load', setupCamera);
+    </script>
+</body>
+</html>
