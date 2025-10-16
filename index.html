@@ -16,15 +16,22 @@
             align-items: center;
             min-height: 100vh;
             margin: 0;
-            overflow: hidden;
+            overflow: auto; /* permet le scroll si nécessaire pour garder les boutons visibles */
         }
         #cameraCanvas {
             max-width: 100%;
+            max-height: calc(60vh); /* limite la hauteur pour garder les boutons visibles */
             border-radius: 0.75rem;
             box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
         }
         #videoFeed {
             display: none;
+        }
+        /* framing guide style */
+        #framingGuide {
+            box-sizing: border-box;
+            border-radius: 0.5rem;
+            pointer-events: none;
         }
     </style>
     <link rel="stylesheet" href="https://rsms.me/inter/inter.css">
@@ -38,7 +45,7 @@
         <div class="relative w-full">
             <canvas id="cameraCanvas" class="bg-gray-800 rounded-xl shadow-lg w-full"></canvas>
             <!-- Élément HTML pour le cadre, plus fiable que le dessin sur canvas -->
-            <div id="framingGuide" class="absolute top-0 left-0 pointer-events-none" style="border: 6px dashed white;"></div>
+            <div id="framingGuide" class="absolute top-0 left-0" style="border: 6px dashed rgba(255,255,255,0.9);"></div>
         </div>
  
         <video id="videoFeed" playsinline></video>
@@ -48,14 +55,20 @@
             <p id="aiDescription" class="text-lg text-gray-300 italic"></p>
             <p id="aiPriceSuggestion" class="mt-3 text-lg text-cyan-400 font-semibold"></p>
         </div>
+
+        <!-- Contrôle de zoom (affiché uniquement en SCANNING) -->
+        <div id="zoomContainer" class="mt-3 flex items-center space-x-3 w-full max-w-lg" style="display: none;">
+            <label id="zoomLabel" for="zoomRange" class="text-sm text-gray-300 min-w-[70px]">Zoom: 100%</label>
+            <input id="zoomRange" type="range" min="1" max="3" step="0.01" value="1" class="w-full">
+        </div>
  
         <div class="mt-6">
             <button id="mainButton" class="px-8 py-3 bg-cyan-600 text-white font-semibold rounded-lg shadow-md hover:bg-cyan-700 focus:outline-none focus:ring-2 focus:ring-cyan-500 focus:ring-opacity-75 transition-transform transform hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed">
                 Valider
             </button>
-            <div id="confirmContainer" class="hidden space-x-4">
-                <button id="retakeButton" class="px-8 py-3 bg-gray-600 text-white font-semibold rounded-lg shadow-md hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-gray-500 focus:ring-opacity-75 transition-transform transform hover:scale-105">Reprendre</button>
-                <button id="confirmButton" class="px-8 py-3 bg-cyan-600 text-white font-semibold rounded-lg shadow-md hover:bg-cyan-700 focus:outline-none focus:ring-2 focus:ring-cyan-500 focus:ring-opacity-75 transition-transform transform hover:scale-105">Confirmer</button>
+            <div id="confirmContainer" class="hidden space-x-4 inline-block ml-4 align-middle">
+                <button id="retakeButton" class="px-6 py-2 bg-gray-600 text-white font-semibold rounded-lg shadow-md hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-gray-500 focus:ring-opacity-75 transition-transform transform hover:scale-105">Reprendre</button>
+                <button id="confirmButton" class="px-6 py-2 bg-cyan-600 text-white font-semibold rounded-lg shadow-md hover:bg-cyan-700 focus:outline-none focus:ring-2 focus:ring-cyan-500 focus:ring-opacity-75 transition-transform transform hover:scale-105">Confirmer</button>
             </div>
             <button id="downloadButton" class="hidden ml-4 px-8 py-3 bg-green-600 text-white font-semibold rounded-lg shadow-md hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-opacity-75 transition-transform transform hover:scale-105">
                 Télécharger la Photo
@@ -77,8 +90,12 @@
         const aiPriceContainer = document.getElementById('aiPriceSuggestion');
         const downloadButton = document.getElementById('downloadButton');
         const framingGuideElement = document.getElementById('framingGuide');
+        const zoomContainer = document.getElementById('zoomContainer');
+        const zoomRange = document.getElementById('zoomRange');
+        const zoomLabel = document.getElementById('zoomLabel');
  
         let finalImageDataUrl = null;
+        let zoom = 1; // facteur de zoom (1 = pas de zoom)
  
         const AppState = {
             SCANNING: 'scanning',
@@ -107,14 +124,35 @@
         function setCanvasDimensions() {
             if (!video.videoWidth) return;
             const aspectRatio = video.videoWidth / video.videoHeight;
-            const containerWidth = canvas.parentElement.offsetWidth;
-            canvas.width = containerWidth;
-            canvas.height = containerWidth / aspectRatio;
+            let containerWidth = canvas.parentElement.offsetWidth;
+            // limiter la hauteur à 60% de la fenêtre pour garder les contrôles visibles
+            const maxHeight = window.innerHeight * 0.6;
+            let height = containerWidth / aspectRatio;
+            let width = containerWidth;
+            if (height > maxHeight) {
+                height = maxHeight;
+                width = height * aspectRatio;
+            }
+            canvas.width = Math.round(width);
+            canvas.height = Math.round(height);
+            // repositionner le guide après redimension
+            updateFramingGuidePosition();
         }
  
         function renderLoop() {
             if (currentAppState === AppState.SCANNING) {
-                ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+                // drawImage avec crop central pour simuler le zoom
+                if (video.videoWidth && video.videoHeight) {
+                    const vW = video.videoWidth;
+                    const vH = video.videoHeight;
+                    const srcW = vW / zoom;
+                    const srcH = vH / zoom;
+                    const sx = (vW - srcW) / 2;
+                    const sy = (vH - srcH) / 2;
+                    ctx.drawImage(video, sx, sy, srcW, srcH, 0, 0, canvas.width, canvas.height);
+                } else {
+                    ctx.clearRect(0, 0, canvas.width, canvas.height);
+                }
                 updateFramingGuidePosition();
             }
             updateUI();
@@ -124,9 +162,10 @@
         function updateUI() {
             aiOutputContainer.style.display = (currentAppState === AppState.GENERATING || currentAppState === AppState.DONE) ? 'block' : 'none';
             mainButton.style.display = (currentAppState === AppState.SCANNING || currentAppState === AppState.DONE) ? 'inline-block' : 'none';
-            confirmContainer.style.display = currentAppState === AppState.CONFIRMING ? 'block' : 'none';
+            confirmContainer.style.display = currentAppState === AppState.CONFIRMING ? 'inline-block' : 'none';
             downloadButton.style.display = 'none';
             framingGuideElement.style.display = currentAppState === AppState.SCANNING ? 'block' : 'none';
+            zoomContainer.style.display = currentAppState === AppState.SCANNING ? 'flex' : 'none';
  
             switch (currentAppState) {
                 case AppState.SCANNING:
@@ -150,31 +189,49 @@
         }
  
         function getFrameRect() {
+            // cadre réduit pour ne pas masquer les contrôles
             return {
-                width: canvas.width * 0.5,
-                height: canvas.height * 0.8,
-                x: (canvas.width * 0.25),
-                y: (canvas.height * 0.1)
+                width: canvas.width * 0.45,
+                height: canvas.height * 0.65,
+                x: (canvas.width * 0.275),
+                y: (canvas.height * 0.175)
             };
         }
        
         function updateFramingGuidePosition() {
             const frameRect = getFrameRect();
-            framingGuideElement.style.width = `${frameRect.width}px`;
-            framingGuideElement.style.height = `${frameRect.height}px`;
-            framingGuideElement.style.top = `${frameRect.y}px`;
-            framingGuideElement.style.left = `${frameRect.x}px`;
+            framingGuideElement.style.width = `${Math.round(frameRect.width)}px`;
+            framingGuideElement.style.height = `${Math.round(frameRect.height)}px`;
+            framingGuideElement.style.top = `${Math.round(frameRect.y)}px`;
+            framingGuideElement.style.left = `${Math.round(frameRect.x)}px`;
         }
  
         function handleMainButtonClick() {
             if (currentAppState === AppState.SCANNING) {
                 currentAppState = AppState.CONFIRMING;
-                ctx.drawImage(video, 0, 0, canvas.width, canvas.height); // Figer l'image
+                // Figer l'image en tenant compte du zoom
+                if (video.videoWidth && video.videoHeight) {
+                    const vW = video.videoWidth;
+                    const vH = video.videoHeight;
+                    const srcW = vW / zoom;
+                    const srcH = vH / zoom;
+                    const sx = (vW - srcW) / 2;
+                    const sy = (vH - srcH) / 2;
+                    ctx.drawImage(video, sx, sy, srcW, srcH, 0, 0, canvas.width, canvas.height);
+                } else {
+                    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+                }
             } else if (currentAppState === AppState.DONE) {
                 resetApp();
             }
         }
        
+        // zoom slider
+        zoomRange.addEventListener('input', () => {
+            zoom = Number(zoomRange.value);
+            zoomLabel.textContent = `Zoom: ${Math.round(zoom * 100)}%`;
+        });
+ 
         async function generateDescription() {
             const frameRect = getFrameRect();
             const tempCanvas = document.createElement('canvas');
@@ -199,15 +256,21 @@
                 return;
             }
  
-            const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-05-20:generateCont…${apiKey}`;
+            // URL de l'API generative language (clé passée en paramètre)
+            const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-05-20:generate?key=${apiKey}`;
  
             const payload = {
-                contents: [{
-                    parts: [
-                        { text: "Analyse cet article de mode d'occasion. Réponds UNIQUEMENT avec un objet JSON valide qui contient deux clés : 'description' (une description courte pour une annonce en ligne) et 'prix' (une fourchette de prix suggérée en euros, ex: '15-20€')." },
-                        { inlineData: { mimeType: "image/jpeg", data: base64ImageData } }
-                    ]
-                }],
+                // Format attendu par l'API : contenu avec texte et image inline
+                instances: [
+                    {
+                        input: {
+                            text: "Analyse cet article de mode d'occasion. Réponds UNIQUEMENT avec un objet JSON valide qui contient deux clés : 'description' (une description courte pour une annonce en ligne) et 'prix' (une fourchette de prix suggérée en euros, ex: '15-20€').",
+                            // l'API réelle peut attendre un format différent; ajustez si nécessaire
+                        },
+                        // image passée séparément si l'API supporte inline image selon le endpoint réel
+                        image: base64ImageData
+                    }
+                ]
             };
  
             try {
@@ -218,19 +281,19 @@
                 });
                 if (!response.ok) throw new Error(`API error: ${response.statusText}`);
                 const result = await response.json();
-                const aiResponseText = result.candidates?.[0]?.content?.parts?.[0]?.text;
+                const aiResponseText = result.candidates?.[0]?.content?.parts?.[0]?.text || result.output?.[0]?.content || JSON.stringify(result);
                
                 try {
                     const cleanedText = aiResponseText.replace(/```json/g, '').replace(/```/g, '').trim();
                     const parsedData = JSON.parse(cleanedText);
                     const description = parsedData.description || "Description non disponible.";
-                    const price = parsedData.prix || "Prix non disponible.";
+                    const price = parsedData.prix || parsedData.price || "Prix non disponible.";
  
                     aiDescriptionContainer.textContent = `"${description}"`;
                     aiPriceContainer.textContent = `Prix suggéré : ${price}`;
                 } catch (parseError) {
                     console.error("Erreur de parsing JSON:", parseError);
-                    aiDescriptionContainer.textContent = aiResponseText || "Impossible de générer une réponse.";
+                    aiDescriptionContainer.textContent = (typeof aiResponseText === 'string') ? aiResponseText : JSON.stringify(aiResponseText);
                     aiPriceContainer.textContent = "";
                 }
  
