@@ -1,353 +1,354 @@
-<script>
-  const video = document.getElementById('videoFeed');
-  const canvas = document.getElementById('cameraCanvas');
-  const ctx = canvas.getContext('2d', { willReadFrequently: true });
-  const feedback = document.getElementById('feedback');
-  const enableCamBtn = document.getElementById('enableCam');
-  const mainButton = document.getElementById('mainButton');
-  const confirmContainer = document.getElementById('confirmContainer');
-  const retakeButton = document.getElementById('retakeButton');
-  const confirmButton = document.getElementById('confirmButton');
-  const aiOutputContainer = document.getElementById('aiOutputContainer');
-  const aiDescriptionContainer = document.getElementById('aiDescription');
-  const aiPriceContainer = document.getElementById('aiPriceSuggestion');
-  const downloadButton = document.getElementById('downloadButton');
-  const framingGuideElement = document.getElementById('framingGuide');
-
-  let finalImageDataUrl = null;
-  let rafId = null;
-
-  // --- États UI ---
-  const AppState = { SCANNING: 'scanning', CONFIRMING: 'confirming', GENERATING: 'generating', DONE: 'done' };
-  let currentAppState = AppState.SCANNING;
-
-  // --- ZOOM state ---
-  let track = null;
-  let zoomCaps = null;          // capacités matérielles (si dispo)
-  let hasHardwareZoom = false;  // indicateur
-  let hwZoom = 1;               // zoom matériel courant
-  let hwZoomMin = 1;
-  let hwZoomMax = 1;
-
-  let swScale = 1;              // fallback: zoom logiciel (canvas)
-  const SW_MIN = 1;
-  const SW_MAX = 4;             // x4 suffit dans la plupart des cas
-
-  // pinch state
-  let pinchStartDist = null;
-  let pinchStartZoom = null;    // (hwZoom ou swScale selon le mode)
-
-  document.addEventListener('gesturestart', e => e.preventDefault()); // iOS: éviter le zoom de page
-  document.addEventListener('gesturechange', e => e.preventDefault());
-  document.addEventListener('gestureend', e => e.preventDefault());
-
-  enableCamBtn.addEventListener('click', async () => {
-    enableCamBtn.disabled = true;
-    await setupCamera();
-  });
-
-  async function setupCamera() {
-    feedback.textContent = "Initialisation de la caméra...";
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' } }, audio: false });
-      startStream(stream);
-      enableCamBtn.style.display = 'none';
-    } catch (e1) {
-      try {
-        const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
-        startStream(stream);
-        enableCamBtn.style.display = 'none';
-      } catch (e2) {
-        console.error("Erreur d'accès à la caméra:", e2);
-        feedback.textContent = e2.name === 'NotAllowedError' ? "Accès à la caméra refusé."
-          : e2.name === 'NotFoundError' ? "Aucune caméra détectée."
-          : "Impossible d'accéder à la caméra.";
-        mainButton.disabled = true;
-        enableCamBtn.disabled = false;
-      }
-    }
-  }
-
-  function startStream(stream) {
-    video.srcObject = stream;
-    track = stream.getVideoTracks()[0];
-    // capacités de zoom matériel
-    try {
-      zoomCaps = track.getCapabilities?.();
-      if (zoomCaps && 'zoom' in zoomCaps) {
-        hasHardwareZoom = true;
-        hwZoomMin = zoomCaps.zoom.min ?? 1;
-        hwZoomMax = zoomCaps.zoom.max ?? 1;
-        hwZoom = track.getSettings?.().zoom ?? 1;
-      }
-    } catch { hasHardwareZoom = false; }
-
-    video.onloadedmetadata = () => {
-      video.play();
-      setCanvasDimensions();
-      startRenderLoop();
-      feedback.textContent = hasHardwareZoom
-        ? "Pince pour zoomer (zoom natif)."
-        : "Pince pour zoomer (zoom logiciel).";
-      attachZoomHandlers();
-    };
-  }
-
-  function setCanvasDimensions() {
-    if (!video.videoWidth) return;
-    const ratio = video.videoWidth / video.videoHeight;
-    const cssW = canvas.parentElement.offsetWidth;
-    const cssH = cssW / ratio;
-    const dpr = window.devicePixelRatio || 1;
-
-    canvas.style.width = cssW + 'px';
-    canvas.style.height = cssH + 'px';
-    canvas.width = Math.round(cssW * dpr);
-    canvas.height = Math.round(cssH * dpr);
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-  }
-
-  function startRenderLoop() {
-    cancelAnimationFrame(rafId);
-    const loop = () => {
-      if (currentAppState === AppState.SCANNING) {
-        if (hasHardwareZoom) {
-          // rendu simple (zoom optique déjà appliqué par le capteur)
-          ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-        } else {
-          // zoom logiciel: on recadre au centre selon swScale
-          const vw = video.videoWidth;
-          const vh = video.videoHeight;
-          const scale = Math.max(SW_MIN, Math.min(SW_MAX, swScale));
-          const cropW = Math.round(vw / scale);
-          const cropH = Math.round(vh / scale);
-          const sx = Math.round((vw - cropW) / 2);
-          const sy = Math.round((vh - cropH) / 2);
-          ctx.drawImage(video, sx, sy, cropW, cropH, 0, 0, canvas.width, canvas.height);
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Snap avec NovSuity</title>
+    <!-- Intégration de Tailwind CSS pour un design moderne -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body {
+            background-color: #111827;
+            color: #F9FAFB;
+            font-family: 'Inter', sans-serif;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            margin: 0;
+            overflow: auto; /* permet le scroll si nécessaire pour garder les boutons visibles */
         }
-        updateFramingGuidePosition();
-      }
-      updateUI();
-      rafId = requestAnimationFrame(loop);
-    };
-    rafId = requestAnimationFrame(loop);
-  }
-
-  function stopRenderLoop() { if (rafId) cancelAnimationFrame(rafId); rafId = null; }
-
-  function updateUI() {
-    aiOutputContainer.style.display =
-      (currentAppState === AppState.GENERATING || currentAppState === AppState.DONE) ? 'block' : 'none';
-    mainButton.style.display =
-      (currentAppState === AppState.SCANNING || currentAppState === AppState.DONE) ? 'inline-block' : 'none';
-    confirmContainer.style.display = currentAppState === AppState.CONFIRMING ? 'block' : 'none';
-    downloadButton.style.display = 'none';
-    framingGuideElement.style.display = currentAppState === AppState.SCANNING ? 'block' : 'none';
-
-    switch (currentAppState) {
-      case AppState.SCANNING:
-        mainButton.textContent = "Valider";
-        mainButton.disabled = false;
-        break;
-      case AppState.CONFIRMING:
-        feedback.textContent = "Validez-vous cette photo ?";
-        break;
-      case AppState.GENERATING:
-        feedback.innerHTML = "✨ Analyse par l'IA en cours...";
-        break;
-      case AppState.DONE:
-        feedback.textContent = "Description générée !";
-        mainButton.textContent = "Recommencer";
-        mainButton.disabled = false;
-        downloadButton.style.display = 'inline-block';
-        break;
-    }
-  }
-
-  function getFrameRect() {
-    return {
-      width: canvas.width * 0.5,
-      height: canvas.height * 0.8,
-      x: (canvas.width * 0.25),
-      y: (canvas.height * 0.1)
-    };
-  }
-
-  function updateFramingGuidePosition() {
-    const frameRect = getFrameRect();
-    const dpr = window.devicePixelRatio || 1;
-    framingGuideElement.style.width  = `${Math.round(frameRect.width / dpr)}px`;
-    framingGuideElement.style.height = `${Math.round(frameRect.height / dpr)}px`;
-    framingGuideElement.style.top    = `${Math.round(frameRect.y / dpr)}px`;
-    framingGuideElement.style.left   = `${Math.round(frameRect.x / dpr)}px`;
-  }
-
-  function handleMainButtonClick() {
-    if (currentAppState === AppState.SCANNING) {
-      currentAppState = AppState.CONFIRMING;
-      stopRenderLoop();
-      // image figée
-      if (hasHardwareZoom) {
-        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-      } else {
-        const vw = video.videoWidth, vh = video.videoHeight;
-        const scale = Math.max(SW_MIN, Math.min(SW_MAX, swScale));
-        const cropW = Math.round(vw / scale);
-        const cropH = Math.round(vh / scale);
-        const sx = Math.round((vw - cropW) / 2);
-        const sy = Math.round((vh - cropH) / 2);
-        ctx.drawImage(video, sx, sy, cropW, cropH, 0, 0, canvas.width, canvas.height);
-      }
-      updateFramingGuidePosition();
-      updateUI();
-    } else if (currentAppState === AppState.DONE) {
-      resetApp();
-    }
-  }
-
-  // --- Pinch & Wheel Zoom handlers ---
-  function distance(t1, t2) { return Math.hypot(t1.pageX - t2.pageX, t1.pageY - t2.pageY); }
-
-  function attachZoomHandlers() {
-    // PINCH (mobile)
-    canvas.addEventListener('touchstart', e => {
-      if (e.touches.length === 2) {
-        e.preventDefault();
-        pinchStartDist = distance(e.touches[0], e.touches[1]);
-        pinchStartZoom = hasHardwareZoom ? hwZoom : swScale;
-      }
-    }, { passive: false });
-
-    canvas.addEventListener('touchmove', e => {
-      if (e.touches.length === 2 && pinchStartDist) {
-        e.preventDefault();
-        const d = distance(e.touches[0], e.touches[1]);
-        const factor = d / pinchStartDist;
-        if (hasHardwareZoom) {
-          const next = clamp(pinchStartZoom * factor, hwZoomMin, hwZoomMax);
-          applyHardwareZoom(next);
-        } else {
-          swScale = clamp(pinchStartZoom * factor, SW_MIN, SW_MAX);
+        #cameraCanvas {
+            max-width: 100%;
+            max-height: calc(60vh); /* limite la hauteur pour garder les boutons visibles */
+            border-radius: 0.75rem;
+            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
         }
-      }
-    }, { passive: false });
+        #videoFeed {
+            display: none;
+        }
+        /* framing guide style */
+        #framingGuide {
+            box-sizing: border-box;
+            border-radius: 0.5rem;
+            pointer-events: none;
+        }
+    </style>
+    <link rel="stylesheet" href="https://rsms.me/inter/inter.css">
+</head>
+<body class="bg-gray-900 text-gray-100 flex flex-col justify-center items-center p-4">
+ 
+    <div class="w-full max-w-2xl text-center">
+        <h1 class="text-3xl md:text-4xl font-bold mb-2">Snap avec NovSuity</h1>
+        <p id="feedback" class="text-lg text-cyan-400 mb-4 h-8 transition-opacity duration-300">Initialisation de la caméra...</p>
+ 
+        <div class="relative w-full">
+            <canvas id="cameraCanvas" class="bg-gray-800 rounded-xl shadow-lg w-full"></canvas>
+            <!-- Élément HTML pour le cadre, plus fiable que le dessin sur canvas -->
+            <div id="framingGuide" class="absolute top-0 left-0" style="border: 6px dashed rgba(255,255,255,0.9);"></div>
+        </div>
+ 
+        <video id="videoFeed" playsinline></video>
+       
+        <!-- Zone pour la description et le prix générés par l'IA -->
+        <div id="aiOutputContainer" class="mt-4 text-left p-4 bg-gray-800 rounded-lg" style="display: none;">
+            <p id="aiDescription" class="text-lg text-gray-300 italic"></p>
+            <p id="aiPriceSuggestion" class="mt-3 text-lg text-cyan-400 font-semibold"></p>
+        </div>
 
-    canvas.addEventListener('touchend', () => { if (event.touches.length < 2) pinchStartDist = null; });
-
-    // WHEEL (desktop)
-    canvas.addEventListener('wheel', e => {
-      // ctrlKey (pinch sur trackpad) ou molette classique
-      const dir = e.deltaY > 0 ? -1 : 1; // inverser si besoin
-      const step = 0.1 * dir;
-      if (hasHardwareZoom) {
-        applyHardwareZoom(clamp(hwZoom + step, hwZoomMin, hwZoomMax));
-      } else {
-        swScale = clamp(swScale + step, SW_MIN, SW_MAX);
-      }
-      e.preventDefault();
-    }, { passive: false });
-  }
-
-  function clamp(v, min, max) { return Math.min(max, Math.max(min, v)); }
-
-  function applyHardwareZoom(value) {
-    if (!track) return;
-    hwZoom = value;
-    try {
-      track.applyConstraints({ advanced: [{ zoom: hwZoom }] });
-    } catch (e) {
-      // si applyConstraints échoue, on repasse en zoom logiciel
-      hasHardwareZoom = false;
-      feedback.textContent = "Zoom matériel indisponible, utilisation du zoom logiciel.";
-    }
-  }
-
-  // --- Génération IA (inchangé sauf appels réseau) ---
-  async function generateDescription() {
-    const frameRect = getFrameRect();
-    const tempCanvas = document.createElement('canvas');
-    tempCanvas.width = frameRect.width;
-    tempCanvas.height = frameRect.height;
-    const tempCtx = tempCanvas.getContext('2d');
-    tempCtx.drawImage(
-      canvas,
-      frameRect.x, frameRect.y, frameRect.width, frameRect.height,
-      0, 0, frameRect.width, frameRect.height
-    );
-
-    const imageDataUrl = tempCanvas.toDataURL('image/jpeg');
-    finalImageDataUrl = imageDataUrl;
-    const base64ImageData = imageDataUrl.split(',')[1];
-
-    try {
-      const response = await fetch('/api/analyze', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ base64: base64ImageData })
-      });
-      if (!response.ok) throw new Error('Erreur API');
-      const result = await response.json();
-
-      const aiText = result?.candidates?.[0]?.content?.parts?.[0]?.text || '';
-      let cleaned = aiText.replace(/```json/gi,'').replace(/```/g,'').trim();
-      let desc = "Description non disponible.";
-      let prix = "Prix non disponible.";
-
-      try {
-        const obj = JSON.parse(cleaned);
-        desc = obj.description || desc;
-        prix = obj.prix || obj.price || prix;
-      } catch { cleaned && (desc = cleaned); }
-
-      aiDescriptionContainer.textContent = `"${desc}"`;
-      aiPriceContainer.textContent = `Prix suggéré : ${prix}`;
-    } catch (e) {
-      console.error(e);
-      aiDescriptionContainer.textContent = "Une erreur est survenue. Veuillez réessayer.";
-      aiPriceContainer.textContent = "";
-    } finally {
-      currentAppState = AppState.DONE;
-      updateUI();
-    }
-  }
-
-  function resetApp() {
-    currentAppState = AppState.SCANNING;
-    aiDescriptionContainer.textContent = '';
-    aiPriceContainer.textContent = '';
-    finalImageDataUrl = null;
-    startRenderLoop();
-    feedback.textContent = hasHardwareZoom
-      ? "Pince pour zoomer (zoom natif)."
-      : "Pince pour zoomer (zoom logiciel).";
-  }
-
-  confirmButton.addEventListener('click', async () => {
-    if (currentAppState === AppState.CONFIRMING) {
-      currentAppState = AppState.GENERATING;
-      updateUI();
-      await generateDescription();
-    }
-  });
-
-  retakeButton.addEventListener('click', () => {
-    if (currentAppState === AppState.CONFIRMING) {
-      currentAppState = AppState.SCANNING;
-      startRenderLoop();
-      updateUI();
-    }
-  });
-
-  downloadButton.addEventListener('click', () => {
-    if (!finalImageDataUrl) return;
-    const link = document.createElement('a');
-    link.href = finalImageDataUrl;
-    link.download = 'snap-avec-novsuity.jpg';
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-  });
-
-  mainButton.addEventListener('click', handleMainButtonClick);
-  window.addEventListener('resize', () => { if (video.srcObject) setCanvasDimensions(); });
-</script>
+        <!-- Contrôle de zoom (affiché uniquement en SCANNING) -->
+        <div id="zoomContainer" class="mt-3 flex items-center space-x-3 w-full max-w-lg" style="display: none;">
+            <label id="zoomLabel" for="zoomRange" class="text-sm text-gray-300 min-w-[70px]">Zoom: 100%</label>
+            <input id="zoomRange" type="range" min="1" max="3" step="0.01" value="1" class="w-full">
+        </div>
+ 
+        <div class="mt-6">
+            <button id="mainButton" class="px-8 py-3 bg-cyan-600 text-white font-semibold rounded-lg shadow-md hover:bg-cyan-700 focus:outline-none focus:ring-2 focus:ring-cyan-500 focus:ring-opacity-75 transition-transform transform hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed">
+                Valider
+            </button>
+            <div id="confirmContainer" class="hidden space-x-4 inline-block ml-4 align-middle">
+                <button id="retakeButton" class="px-6 py-2 bg-gray-600 text-white font-semibold rounded-lg shadow-md hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-gray-500 focus:ring-opacity-75 transition-transform transform hover:scale-105">Reprendre</button>
+                <button id="confirmButton" class="px-6 py-2 bg-cyan-600 text-white font-semibold rounded-lg shadow-md hover:bg-cyan-700 focus:outline-none focus:ring-2 focus:ring-cyan-500 focus:ring-opacity-75 transition-transform transform hover:scale-105">Confirmer</button>
+            </div>
+            <button id="downloadButton" class="hidden ml-4 px-8 py-3 bg-green-600 text-white font-semibold rounded-lg shadow-md hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-opacity-75 transition-transform transform hover:scale-105">
+                Télécharger la Photo
+            </button>
+        </div>
+    </div>
+ 
+    <script>
+        const video = document.getElementById('videoFeed');
+        const canvas = document.getElementById('cameraCanvas');
+        const ctx = canvas.getContext('2d', { willReadFrequently: true });
+        const feedback = document.getElementById('feedback');
+        const mainButton = document.getElementById('mainButton');
+        const confirmContainer = document.getElementById('confirmContainer');
+        const retakeButton = document.getElementById('retakeButton');
+        const confirmButton = document.getElementById('confirmButton');
+        const aiOutputContainer = document.getElementById('aiOutputContainer');
+        const aiDescriptionContainer = document.getElementById('aiDescription');
+        const aiPriceContainer = document.getElementById('aiPriceSuggestion');
+        const downloadButton = document.getElementById('downloadButton');
+        const framingGuideElement = document.getElementById('framingGuide');
+        const zoomContainer = document.getElementById('zoomContainer');
+        const zoomRange = document.getElementById('zoomRange');
+        const zoomLabel = document.getElementById('zoomLabel');
+ 
+        let finalImageDataUrl = null;
+        let zoom = 1; // facteur de zoom (1 = pas de zoom)
+ 
+        const AppState = {
+            SCANNING: 'scanning',
+            CONFIRMING: 'confirming',
+            GENERATING: 'generating',
+            DONE: 'done'
+        };
+        let currentAppState = AppState.SCANNING;
+ 
+        async function setupCamera() {
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
+                video.srcObject = stream;
+                video.onloadedmetadata = () => {
+                    video.play();
+                    setCanvasDimensions();
+                    requestAnimationFrame(renderLoop);
+                };
+            } catch (error) {
+                console.error("Erreur d'accès à la caméra:", error);
+                feedback.textContent = "Impossible d'accéder à la caméra.";
+                mainButton.disabled = true;
+            }
+        }
+       
+        function setCanvasDimensions() {
+            if (!video.videoWidth) return;
+            const aspectRatio = video.videoWidth / video.videoHeight;
+            let containerWidth = canvas.parentElement.offsetWidth;
+            // limiter la hauteur à 60% de la fenêtre pour garder les contrôles visibles
+            const maxHeight = window.innerHeight * 0.6;
+            let height = containerWidth / aspectRatio;
+            let width = containerWidth;
+            if (height > maxHeight) {
+                height = maxHeight;
+                width = height * aspectRatio;
+            }
+            canvas.width = Math.round(width);
+            canvas.height = Math.round(height);
+            // repositionner le guide après redimension
+            updateFramingGuidePosition();
+        }
+ 
+        function renderLoop() {
+            if (currentAppState === AppState.SCANNING) {
+                // drawImage avec crop central pour simuler le zoom
+                if (video.videoWidth && video.videoHeight) {
+                    const vW = video.videoWidth;
+                    const vH = video.videoHeight;
+                    const srcW = vW / zoom;
+                    const srcH = vH / zoom;
+                    const sx = (vW - srcW) / 2;
+                    const sy = (vH - srcH) / 2;
+                    ctx.drawImage(video, sx, sy, srcW, srcH, 0, 0, canvas.width, canvas.height);
+                } else {
+                    ctx.clearRect(0, 0, canvas.width, canvas.height);
+                }
+                updateFramingGuidePosition();
+            }
+            updateUI();
+            requestAnimationFrame(renderLoop);
+        }
+ 
+        function updateUI() {
+            aiOutputContainer.style.display = (currentAppState === AppState.GENERATING || currentAppState === AppState.DONE) ? 'block' : 'none';
+            mainButton.style.display = (currentAppState === AppState.SCANNING || currentAppState === AppState.DONE) ? 'inline-block' : 'none';
+            confirmContainer.style.display = currentAppState === AppState.CONFIRMING ? 'inline-block' : 'none';
+            downloadButton.style.display = 'none';
+            framingGuideElement.style.display = currentAppState === AppState.SCANNING ? 'block' : 'none';
+            zoomContainer.style.display = currentAppState === AppState.SCANNING ? 'flex' : 'none';
+ 
+            switch (currentAppState) {
+                case AppState.SCANNING:
+                    feedback.textContent = "Centrez le cadre et validez.";
+                    mainButton.textContent = "Valider";
+                    mainButton.disabled = false;
+                    break;
+                case AppState.CONFIRMING:
+                    feedback.textContent = "Validez-vous cette photo ?";
+                    break;
+                case AppState.GENERATING:
+                    feedback.innerHTML = "✨ Analyse par l'IA en cours...";
+                    break;
+                case AppState.DONE:
+                    feedback.textContent = "Description générée !";
+                    mainButton.textContent = "Recommencer";
+                    mainButton.disabled = false;
+                    downloadButton.style.display = 'inline-block';
+                    break;
+            }
+        }
+ 
+        function getFrameRect() {
+            // cadre réduit pour ne pas masquer les contrôles
+            return {
+                width: canvas.width * 0.45,
+                height: canvas.height * 0.65,
+                x: (canvas.width * 0.275),
+                y: (canvas.height * 0.175)
+            };
+        }
+       
+        function updateFramingGuidePosition() {
+            const frameRect = getFrameRect();
+            framingGuideElement.style.width = `${Math.round(frameRect.width)}px`;
+            framingGuideElement.style.height = `${Math.round(frameRect.height)}px`;
+            framingGuideElement.style.top = `${Math.round(frameRect.y)}px`;
+            framingGuideElement.style.left = `${Math.round(frameRect.x)}px`;
+        }
+ 
+        function handleMainButtonClick() {
+            if (currentAppState === AppState.SCANNING) {
+                currentAppState = AppState.CONFIRMING;
+                // Figer l'image en tenant compte du zoom
+                if (video.videoWidth && video.videoHeight) {
+                    const vW = video.videoWidth;
+                    const vH = video.videoHeight;
+                    const srcW = vW / zoom;
+                    const srcH = vH / zoom;
+                    const sx = (vW - srcW) / 2;
+                    const sy = (vH - srcH) / 2;
+                    ctx.drawImage(video, sx, sy, srcW, srcH, 0, 0, canvas.width, canvas.height);
+                } else {
+                    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+                }
+            } else if (currentAppState === AppState.DONE) {
+                resetApp();
+            }
+        }
+       
+        // zoom slider
+        zoomRange.addEventListener('input', () => {
+            zoom = Number(zoomRange.value);
+            zoomLabel.textContent = `Zoom: ${Math.round(zoom * 100)}%`;
+        });
+ 
+        async function generateDescription() {
+            const frameRect = getFrameRect();
+            const tempCanvas = document.createElement('canvas');
+            tempCanvas.width = frameRect.width;
+            tempCanvas.height = frameRect.height;
+            const tempCtx = tempCanvas.getContext('2d');
+            // Dessiner la partie figée du canvas principal
+            tempCtx.drawImage(canvas, frameRect.x, frameRect.y, frameRect.width, frameRect.height, 0, 0, frameRect.width, frameRect.height);
+           
+            const imageDataUrl = tempCanvas.toDataURL('image/jpeg');
+            finalImageDataUrl = imageDataUrl;
+            const base64ImageData = imageDataUrl.split(',')[1];
+ 
+            // --- CONFIGURATION DE LA CLÉ API ---
+            const apiKey = "AIzaSyBPSmq3gmqdUvTkTnPqwpZsk8rkcIf6fNY";
+            // ------------------------------------
+ 
+            if (apiKey === "VOTRE_CLE_API_GEMINI_ICI") {
+                aiDescriptionContainer.textContent = "Erreur : La clé API Gemini n'a pas été configurée.";
+                aiPriceContainer.textContent = "Veuillez l'ajouter dans le code pour activer l'analyse.";
+                currentAppState = AppState.DONE;
+                return;
+            }
+ 
+            // URL de l'API generative language (clé passée en paramètre)
+            const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-05-20:generate?key=${apiKey}`;
+ 
+            const payload = {
+                // Format attendu par l'API : contenu avec texte et image inline
+                instances: [
+                    {
+                        input: {
+                            text: "Analyse cet article de mode d'occasion. Réponds UNIQUEMENT avec un objet JSON valide qui contient deux clés : 'description' (une description courte pour une annonce en ligne) et 'prix' (une fourchette de prix suggérée en euros, ex: '15-20€').",
+                            // l'API réelle peut attendre un format différent; ajustez si nécessaire
+                        },
+                        // image passée séparément si l'API supporte inline image selon le endpoint réel
+                        image: base64ImageData
+                    }
+                ]
+            };
+ 
+            try {
+                const response = await fetch(apiUrl, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                if (!response.ok) throw new Error(`API error: ${response.statusText}`);
+                const result = await response.json();
+                const aiResponseText = result.candidates?.[0]?.content?.parts?.[0]?.text || result.output?.[0]?.content || JSON.stringify(result);
+               
+                try {
+                    const cleanedText = aiResponseText.replace(/```json/g, '').replace(/```/g, '').trim();
+                    const parsedData = JSON.parse(cleanedText);
+                    const description = parsedData.description || "Description non disponible.";
+                    const price = parsedData.prix || parsedData.price || "Prix non disponible.";
+ 
+                    aiDescriptionContainer.textContent = `"${description}"`;
+                    aiPriceContainer.textContent = `Prix suggéré : ${price}`;
+                } catch (parseError) {
+                    console.error("Erreur de parsing JSON:", parseError);
+                    aiDescriptionContainer.textContent = (typeof aiResponseText === 'string') ? aiResponseText : JSON.stringify(aiResponseText);
+                    aiPriceContainer.textContent = "";
+                }
+ 
+            } catch (error) {
+                console.error("Erreur lors de l'appel à l'API Gemini:", error);
+                aiDescriptionContainer.textContent = "Une erreur est survenue. Veuillez réessayer.";
+                aiPriceContainer.textContent = "";
+            } finally {
+                currentAppState = AppState.DONE;
+            }
+        }
+ 
+        function resetApp() {
+            currentAppState = AppState.SCANNING;
+            aiDescriptionContainer.textContent = '';
+            aiPriceContainer.textContent = '';
+            finalImageDataUrl = null;
+            // Relancer la boucle de rendu pour réactiver la vidéo
+            requestAnimationFrame(renderLoop);
+        }
+       
+        confirmButton.addEventListener('click', async () => {
+            if (currentAppState === AppState.CONFIRMING) {
+                currentAppState = AppState.GENERATING;
+                await generateDescription();
+            }
+        });
+ 
+        retakeButton.addEventListener('click', () => {
+            if (currentAppState === AppState.CONFIRMING) {
+                currentAppState = AppState.SCANNING;
+                // Relancer la boucle de rendu pour réactiver la vidéo
+                requestAnimationFrame(renderLoop);
+            }
+        });
+ 
+        downloadButton.addEventListener('click', () => {
+            if (!finalImageDataUrl) return;
+            const link = document.createElement('a');
+            link.href = finalImageDataUrl;
+            link.download = 'snap-avec-novsuity.jpg';
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+        });
+ 
+        mainButton.addEventListener('click', handleMainButtonClick);
+       
+        window.addEventListener('resize', () => {
+            if (video.srcObject) {
+                setCanvasDimensions();
+            }
+        });
+ 
+        window.addEventListener('load', setupCamera);
+    </script>
+</body>
+</html>
