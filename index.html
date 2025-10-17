@@ -197,19 +197,54 @@
       el.style.borderRadius = Math.round(stroke * 2) + 'px';
     }
 
-    function handleMainButtonClick() {
-      if (currentAppState === AppState.SCANNING) {
-        currentAppState = AppState.CONFIRMING;
-        if (video.videoWidth && video.videoHeight) {
-          const vW = video.videoWidth, vH = video.videoHeight;
-          const srcW = vW / zoom, srcH = vH / zoom;
-          const sx = (vW - srcW) / 2, sy = (vH - srcH) / 2;
-          ctx.drawImage(video, sx, sy, srcW, srcH, 0, 0, canvas.width, canvas.height);
-        }
-      } else if (currentAppState === AppState.DONE) {
-        resetApp();
-      }
+function handleMainButtonClick() {
+  if (currentAppState === AppState.SCANNING) {
+    currentAppState = AppState.CONFIRMING;
+
+    // On récupère les dimensions du cadre
+    const frame = getFrameRect();
+
+    // Créer un nouveau canvas temporaire aux dimensions exactes du cadre
+    const tempCanvas = document.createElement('canvas');
+    tempCanvas.width = frame.width;
+    tempCanvas.height = frame.height;
+    const tempCtx = tempCanvas.getContext('2d');
+
+    // Calculer le zoom logiciel actuel
+    if (video.videoWidth && video.videoHeight) {
+      const vW = video.videoWidth;
+      const vH = video.videoHeight;
+      const srcW = vW / zoom;
+      const srcH = vH / zoom;
+      const sx = (vW - srcW) / 2;
+      const sy = (vH - srcH) / 2;
+
+      // Dessine uniquement la zone correspondant au cadre
+      // Conversion du cadre (en px canvas) vers la portion correspondante de la vidéo
+      const cropX = sx + (frame.x / canvas.width) * srcW;
+      const cropY = sy + (frame.y / canvas.height) * srcH;
+      const cropW = (frame.width / canvas.width) * srcW;
+      const cropH = (frame.height / canvas.height) * srcH;
+
+      tempCtx.drawImage(video, cropX, cropY, cropW, cropH, 0, 0, frame.width, frame.height);
     }
+
+    // On redimensionne le canvas principal pour ne garder QUE la zone cadrée
+    canvas.width = frame.width;
+    canvas.height = frame.height;
+
+    // Effacer tout et redessiner juste l’image recadrée
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.drawImage(tempCanvas, 0, 0, frame.width, frame.height);
+
+    // Masquer le cadre visuel
+    framingGuideElement.style.display = "none";
+
+  } else if (currentAppState === AppState.DONE) {
+    resetApp();
+  }
+}
+
 
     // --- Slider (sans texte) + Pinch pour le confort ---
     function clamp(v,min,max){ return Math.min(max, Math.max(min, v)); }
