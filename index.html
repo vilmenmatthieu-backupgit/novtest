@@ -27,7 +27,7 @@
     }
     #videoFeed { display: none; }
 
-    /* ✅ style du cadre exactement comme sur ta capture */
+    /* ✅ style du cadre identique à ta capture */
     #framingGuide {
       position: absolute;
       border: 6px dashed rgba(255,255,255,0.9);
@@ -39,6 +39,7 @@
       width: 70%;
       height: 70%;
       box-sizing: border-box;
+      display: none; /* caché par défaut jusqu'à autorisation caméra */
     }
 
     /* slider */
@@ -61,9 +62,7 @@
     }
 
     /* bouton plus compact et centré */
-    #mainButton {
-      min-width: 140px;
-    }
+    #mainButton { min-width: 140px; }
 
     @media (max-width: 480px) {
       #actionsContainer > * { width: 100%; }
@@ -78,7 +77,7 @@
 
     <div class="relative w-full">
       <canvas id="cameraCanvas" class="rounded-xl shadow-lg w-full"></canvas>
-    <div id="framingGuide" style="display: none;"></div>
+      <div id="framingGuide"></div>
     </div>
 
     <video id="videoFeed" playsinline></video>
@@ -129,29 +128,27 @@
     const AppState = { SCANNING: 'scanning', CONFIRMING: 'confirming', DONE: 'done' };
     let currentAppState = AppState.SCANNING;
 
-async function setupCamera() {
-  try {
-    const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
-    video.srcObject = stream;
-    video.onloadedmetadata = () => {
-      video.play();
-      setCanvasDimensions();
-
-      // ✅ Affiche le cadre SEULEMENT quand la caméra est prête
-      framingGuideElement.style.display = "block";
-      feedback.textContent = "Centrez le cadre et validez.";
-
-      requestAnimationFrame(renderLoop);
-    };
-  } catch {
-    feedback.textContent = "Impossible d'accéder à la caméra.";
-    mainButton.disabled = true;
-
-    // ❌ Cache le cadre si la caméra n'est pas accessible
-    framingGuideElement.style.display = "none";
-  }
-}
-
+    // --- Camera ---
+    async function setupCamera() {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
+        video.srcObject = stream;
+        video.onloadedmetadata = () => {
+          video.play();
+          setCanvasDimensions();
+          // ✅ afficher le cadre et le slider seulement quand la caméra est prête
+          framingGuideElement.style.display = "block";
+          zoomContainer.style.display = "block";
+          feedback.textContent = "Centrez le cadre et validez.";
+          requestAnimationFrame(renderLoop);
+        };
+      } catch {
+        feedback.textContent = "Impossible d'accéder à la caméra.";
+        mainButton.disabled = true;
+        framingGuideElement.style.display = "none";
+        zoomContainer.style.display = "none";
+      }
+    }
 
     function setCanvasDimensions() {
       if (!video.videoWidth) return;
@@ -160,10 +157,7 @@ async function setupCamera() {
       const maxHeight = window.innerHeight * 0.6;
       let height = containerWidth / aspect;
       let width = containerWidth;
-      if (height > maxHeight) {
-        height = maxHeight;
-        width = height * aspect;
-      }
+      if (height > maxHeight) { height = maxHeight; width = height * aspect; }
       canvas.width = width;
       canvas.height = height;
     }
@@ -179,40 +173,79 @@ async function setupCamera() {
       requestAnimationFrame(renderLoop);
     }
 
+    // --- Helper : cadre -> coordonnées canvas px
+    function getFrameRectInCanvasPx() {
+      const frameBox  = framingGuideElement.getBoundingClientRect();
+      const canvasBox = canvas.getBoundingClientRect();
+
+      const fx = frameBox.left - canvasBox.left;
+      const fy = frameBox.top  - canvasBox.top;
+      const fw = frameBox.width;
+      const fh = frameBox.height;
+
+      const sx = canvas.width  / canvasBox.width;
+      const sy = canvas.height / canvasBox.height;
+
+      return {
+        x: Math.round(fx * sx),
+        y: Math.round(fy * sy),
+        width:  Math.round(fw * sx),
+        height: Math.round(fh * sy),
+      };
+    }
+
+    // --- Capture stricte : on ne garde que l'intérieur du cadre (compatible zoom)
     function handleMainButtonClick() {
       if (currentAppState === AppState.SCANNING) {
         currentAppState = AppState.CONFIRMING;
-        const frameRect = framingGuideElement.getBoundingClientRect();
-        const canvasRect = canvas.getBoundingClientRect();
-        const scaleX = video.videoWidth / canvasRect.width;
-        const scaleY = video.videoHeight / canvasRect.height;
 
-        const cropX = (frameRect.left - canvasRect.left) * scaleX;
-        const cropY = (frameRect.top - canvasRect.top) * scaleY;
-        const cropW = frameRect.width * scaleX;
-        const cropH = frameRect.height * scaleY;
+        const frame = getFrameRectInCanvasPx();
 
-        const tempCanvas = document.createElement('canvas');
-        tempCanvas.width = cropW;
-        tempCanvas.height = cropH;
-        const tempCtx = tempCanvas.getContext('2d');
-        tempCtx.drawImage(video, cropX, cropY, cropW, cropH, 0, 0, cropW, cropH);
+        // zone source affichée vu le zoom
+        const vW = video.videoWidth, vH = video.videoHeight;
+        const srcW = vW / zoom,     srcH = vH / zoom;
+        const sx = (vW - srcW) / 2, sy = (vH - srcH) / 2;
 
-        canvas.width = cropW;
-        canvas.height = cropH;
-        ctx.drawImage(tempCanvas, 0, 0);
-        framingGuideElement.style.display = "none";
+        // conversion cadre(canvas) -> source(video)
+        const cropX = sx + (frame.x      / canvas.width)  * srcW;
+        const cropY = sy + (frame.y      / canvas.height) * srcH;
+        const cropW =      (frame.width  / canvas.width)  * srcW;
+        const cropH =      (frame.height / canvas.height) * srcH;
+
+        const out = document.createElement('canvas');
+        out.width  = Math.max(1, frame.width);
+        out.height = Math.max(1, frame.height);
+        const octx = out.getContext('2d');
+        octx.imageSmoothingEnabled = true;
+        octx.drawImage(video, cropX, cropY, cropW, cropH, 0, 0, out.width, out.height);
+
+        // afficher l'image recadrée
+        canvas.width = out.width;
+        canvas.height = out.height;
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        ctx.drawImage(out, 0, 0);
+
+        // masquer le cadre pendant la confirmation
+        framingGuideElement.style.display = 'none';
+        updateUI();
+
       } else if (currentAppState === AppState.DONE) {
         resetApp();
       }
     }
 
+    // --- UI ---
     function updateUI() {
       mainButton.style.display = (currentAppState === AppState.SCANNING || currentAppState === AppState.DONE) ? 'inline-block' : 'none';
       confirmContainer.style.display = currentAppState === AppState.CONFIRMING ? 'flex' : 'none';
       downloadButton.style.display = currentAppState === AppState.DONE ? 'inline-block' : 'none';
-      zoomContainer.style.display = currentAppState === AppState.SCANNING ? 'block' : 'none';
-      framingGuideElement.style.display = currentAppState === AppState.SCANNING ? 'block' : 'none';
+
+      // le cadre et le slider restent visibles uniquement en SCANNING (et si caméra ok)
+      if (currentAppState === AppState.SCANNING) {
+        // affichés seulement si la caméra a été autorisée (setupCamera les active)
+      } else {
+        zoomContainer.style.display = 'none';
+      }
 
       switch (currentAppState) {
         case AppState.SCANNING:
@@ -228,6 +261,7 @@ async function setupCamera() {
       }
     }
 
+    // events
     zoomRange.addEventListener('input', () => { zoom = Number(zoomRange.value); });
     confirmButton.addEventListener('click', () => { currentAppState = AppState.DONE; updateUI(); });
     retakeButton.addEventListener('click', resetApp);
@@ -240,8 +274,12 @@ async function setupCamera() {
 
     function resetApp() {
       currentAppState = AppState.SCANNING;
-      framingGuideElement.style.display = "block";
       setCanvasDimensions();
+      // on ré-affiche le cadre et le slider uniquement si la caméra est active
+      if (video.srcObject) {
+        framingGuideElement.style.display = 'block';
+        zoomContainer.style.display = 'block';
+      }
     }
 
     mainButton.addEventListener('click', handleMainButtonClick);
