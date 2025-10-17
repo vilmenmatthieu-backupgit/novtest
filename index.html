@@ -78,7 +78,7 @@
 
     <div class="relative w-full">
       <canvas id="cameraCanvas" class="rounded-xl shadow-lg w-full"></canvas>
-      <div id="framingGuide"></div>
+    <div id="framingGuide" style="display: none;"></div>
     </div>
 
     <video id="videoFeed" playsinline></video>
@@ -129,20 +129,29 @@
     const AppState = { SCANNING: 'scanning', CONFIRMING: 'confirming', DONE: 'done' };
     let currentAppState = AppState.SCANNING;
 
-    async function setupCamera() {
-      try {
-        const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
-        video.srcObject = stream;
-        video.onloadedmetadata = () => {
-          video.play();
-          setCanvasDimensions();
-          requestAnimationFrame(renderLoop);
-        };
-      } catch {
-        feedback.textContent = "Impossible d'accéder à la caméra.";
-        mainButton.disabled = true;
-      }
-    }
+async function setupCamera() {
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
+    video.srcObject = stream;
+    video.onloadedmetadata = () => {
+      video.play();
+      setCanvasDimensions();
+
+      // ✅ Affiche le cadre SEULEMENT quand la caméra est prête
+      framingGuideElement.style.display = "block";
+      feedback.textContent = "Centrez le cadre et validez.";
+
+      requestAnimationFrame(renderLoop);
+    };
+  } catch {
+    feedback.textContent = "Impossible d'accéder à la caméra.";
+    mainButton.disabled = true;
+
+    // ❌ Cache le cadre si la caméra n'est pas accessible
+    framingGuideElement.style.display = "none";
+  }
+}
+
 
     function setCanvasDimensions() {
       if (!video.videoWidth) return;
