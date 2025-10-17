@@ -27,7 +27,21 @@
     }
     #videoFeed { display: none; }
 
-    /* Slider */
+    /* ✅ style du cadre exactement comme sur ta capture */
+    #framingGuide {
+      position: absolute;
+      border: 6px dashed rgba(255,255,255,0.9);
+      border-radius: 0.75rem;
+      pointer-events: none;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      width: 70%;
+      height: 70%;
+      box-sizing: border-box;
+    }
+
+    /* slider */
     input[type="range"] {
       -webkit-appearance: none;
       appearance: none;
@@ -38,14 +52,19 @@
     }
     input[type="range"]::-webkit-slider-thumb {
       -webkit-appearance: none;
-      width: 22px; height: 22px;
+      width: 22px;
+      height: 22px;
       border-radius: 50%;
       background: #06b6d4;
       border: 2px solid #0e7490;
       box-shadow: 0 2px 6px rgba(0,0,0,.25);
     }
 
-    /* Boutons */
+    /* bouton plus compact et centré */
+    #mainButton {
+      min-width: 140px;
+    }
+
     @media (max-width: 480px) {
       #actionsContainer > * { width: 100%; }
     }
@@ -59,34 +78,15 @@
 
     <div class="relative w-full">
       <canvas id="cameraCanvas" class="rounded-xl shadow-lg w-full"></canvas>
-
-      <!-- ✅ Cadre pointillé parfait (pas de point blanc) -->
-      <svg id="framingGuide" class="absolute top-0 left-0 pointer-events-none"
-           width="0" height="0" viewBox="0 0 100 100" preserveAspectRatio="none">
-        <rect id="fgRect" x="5" y="5" width="90" height="90"
-              fill="none"
-              stroke="rgba(255,255,255,0.92)"
-              stroke-width="6"
-              stroke-linecap="round"
-              stroke-linejoin="round"
-              stroke-dasharray="22 18"/>
-      </svg>
+      <div id="framingGuide"></div>
     </div>
 
     <video id="videoFeed" playsinline></video>
 
-    <!-- Zoom slider -->
     <div id="zoomContainer" class="mt-3 w-full max-w-lg" style="display:none;">
       <input id="zoomRange" type="range" min="1" max="3" step="0.01" value="1" class="w-full">
     </div>
 
-    <!-- Résultats IA (facultatif) -->
-    <div id="aiOutputContainer" class="mt-4 text-left p-4 bg-gray-800 rounded-lg" style="display:none;">
-      <p id="aiDescription" class="text-lg text-gray-300 italic"></p>
-      <p id="aiPriceSuggestion" class="mt-3 text-lg text-cyan-400 font-semibold"></p>
-    </div>
-
-    <!-- Actions -->
     <div id="actionsContainer" class="mt-6 flex flex-wrap gap-4 justify-center">
       <button id="mainButton"
         class="px-6 py-2 bg-cyan-600 text-white font-semibold rounded-lg shadow-md hover:bg-cyan-700 focus:outline-none focus:ring-2 focus:ring-cyan-500 transition-transform hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed">
@@ -115,19 +115,15 @@
     const video = document.getElementById('videoFeed');
     const canvas = document.getElementById('cameraCanvas');
     const ctx = canvas.getContext('2d', { willReadFrequently: true });
-
     const feedback = document.getElementById('feedback');
     const mainButton = document.getElementById('mainButton');
     const confirmContainer = document.getElementById('confirmContainer');
     const retakeButton = document.getElementById('retakeButton');
     const confirmButton = document.getElementById('confirmButton');
     const downloadButton = document.getElementById('downloadButton');
+    const framingGuideElement = document.getElementById('framingGuide');
     const zoomContainer = document.getElementById('zoomContainer');
     const zoomRange = document.getElementById('zoomRange');
-
-    // SVG frame refs
-    const framingGuideSVG = document.getElementById('framingGuide');
-    const fgRect = document.getElementById('fgRect');
 
     let zoom = 1;
     const AppState = { SCANNING: 'scanning', CONFIRMING: 'confirming', DONE: 'done' };
@@ -161,49 +157,6 @@
       }
       canvas.width = width;
       canvas.height = height;
-      updateFramingGuidePosition();
-    }
-
-    function getFrameRect() {
-      const portrait = canvas.height > canvas.width;
-      const widthFactor = portrait ? 0.7 : 0.55;
-      const heightFactor = 0.8;
-      const w = canvas.width * widthFactor;
-      const h = canvas.height * heightFactor;
-      return {
-        width:  w,
-        height: h,
-        x: (canvas.width  - w) / 2,
-        y: (canvas.height - h) / 2
-      };
-    }
-
-    // ✅ centre et dimensionne le SVG aux px CSS réels (pas d'écart à gauche)
-    function updateFramingGuidePosition() {
-      const frame = getFrameRect();
-      const box = canvas.getBoundingClientRect();
-      const sx = box.width  / canvas.width;
-      const sy = box.height / canvas.height;
-
-      const cssW = Math.round(frame.width  * sx);
-      const cssH = Math.round(frame.height * sy);
-      const cssX = Math.round(frame.x      * sx);
-      const cssY = Math.round(frame.y      * sy);
-
-      framingGuideSVG.style.width  = cssW + 'px';
-      framingGuideSVG.style.height = cssH + 'px';
-      framingGuideSVG.style.left   = cssX + 'px';
-      framingGuideSVG.style.top    = cssY + 'px';
-
-      // garder une épaisseur & des tirets élégants quelle que soit la taille
-      const stroke = Math.max(4, Math.round(Math.min(cssW, cssH) * 0.015));
-      fgRect.setAttribute('stroke-width', String(stroke));
-      fgRect.setAttribute('rx', String(Math.round(stroke * 2)));
-      fgRect.setAttribute('ry', String(Math.round(stroke * 2)));
-
-      const dash = Math.round(stroke * 3.6);
-      const gap  = Math.round(stroke * 3.0);
-      fgRect.setAttribute('stroke-dasharray', `${dash} ${gap}`);
     }
 
     function renderLoop() {
@@ -212,7 +165,6 @@
         const srcW = vW / zoom, srcH = vH / zoom;
         const sx = (vW - srcW) / 2, sy = (vH - srcH) / 2;
         ctx.drawImage(video, sx, sy, srcW, srcH, 0, 0, canvas.width, canvas.height);
-        updateFramingGuidePosition();
       }
       updateUI();
       requestAnimationFrame(renderLoop);
@@ -221,30 +173,26 @@
     function handleMainButtonClick() {
       if (currentAppState === AppState.SCANNING) {
         currentAppState = AppState.CONFIRMING;
+        const frameRect = framingGuideElement.getBoundingClientRect();
+        const canvasRect = canvas.getBoundingClientRect();
+        const scaleX = video.videoWidth / canvasRect.width;
+        const scaleY = video.videoHeight / canvasRect.height;
 
-        const frame = getFrameRect();
+        const cropX = (frameRect.left - canvasRect.left) * scaleX;
+        const cropY = (frameRect.top - canvasRect.top) * scaleY;
+        const cropW = frameRect.width * scaleX;
+        const cropH = frameRect.height * scaleY;
+
         const tempCanvas = document.createElement('canvas');
-        tempCanvas.width = frame.width;
-        tempCanvas.height = frame.height;
+        tempCanvas.width = cropW;
+        tempCanvas.height = cropH;
         const tempCtx = tempCanvas.getContext('2d');
+        tempCtx.drawImage(video, cropX, cropY, cropW, cropH, 0, 0, cropW, cropH);
 
-        const vW = video.videoWidth, vH = video.videoHeight;
-        const srcW = vW / zoom, srcH = vH / zoom;
-        const sx = (vW - srcW) / 2, sy = (vH - srcH) / 2;
-
-        const cropX = sx + (frame.x / canvas.width) * srcW;
-        const cropY = sy + (frame.y / canvas.height) * srcH;
-        const cropW = (frame.width / canvas.width) * srcW;
-        const cropH = (frame.height / canvas.height) * srcH;
-
-        tempCtx.drawImage(video, cropX, cropY, cropW, cropH, 0, 0, frame.width, frame.height);
-
-        canvas.width = frame.width;
-        canvas.height = frame.height;
-        ctx.clearRect(0, 0, frame.width, frame.height);
+        canvas.width = cropW;
+        canvas.height = cropH;
         ctx.drawImage(tempCanvas, 0, 0);
-
-        framingGuideSVG.style.display = "none";
+        framingGuideElement.style.display = "none";
       } else if (currentAppState === AppState.DONE) {
         resetApp();
       }
@@ -255,7 +203,7 @@
       confirmContainer.style.display = currentAppState === AppState.CONFIRMING ? 'flex' : 'none';
       downloadButton.style.display = currentAppState === AppState.DONE ? 'inline-block' : 'none';
       zoomContainer.style.display = currentAppState === AppState.SCANNING ? 'block' : 'none';
-      framingGuideSVG.style.display = currentAppState === AppState.SCANNING ? 'block' : 'none';
+      framingGuideElement.style.display = currentAppState === AppState.SCANNING ? 'block' : 'none';
 
       switch (currentAppState) {
         case AppState.SCANNING:
@@ -283,7 +231,7 @@
 
     function resetApp() {
       currentAppState = AppState.SCANNING;
-      framingGuideSVG.style.display = "block";
+      framingGuideElement.style.display = "block";
       setCanvasDimensions();
     }
 
