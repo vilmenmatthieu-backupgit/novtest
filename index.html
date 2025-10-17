@@ -27,17 +27,6 @@
     }
     #videoFeed { display: none; }
 
-    /* Cadre pointillé propre et bien centré */
-    #framingGuide {
-      border: 6px dashed rgba(255,255,255,0.9);
-      border-radius: 0.75rem;
-      pointer-events: none;
-      position: absolute;
-      top: 0;
-      left: 50%;
-      transform: translateX(-50%); /* ✅ centrage horizontal parfait */
-    }
-
     /* Slider */
     input[type="range"] {
       -webkit-appearance: none;
@@ -49,8 +38,7 @@
     }
     input[type="range"]::-webkit-slider-thumb {
       -webkit-appearance: none;
-      width: 22px;
-      height: 22px;
+      width: 22px; height: 22px;
       border-radius: 50%;
       background: #06b6d4;
       border: 2px solid #0e7490;
@@ -71,7 +59,18 @@
 
     <div class="relative w-full">
       <canvas id="cameraCanvas" class="rounded-xl shadow-lg w-full"></canvas>
-      <div id="framingGuide"></div>
+
+      <!-- ✅ Cadre pointillé parfait (pas de point blanc) -->
+      <svg id="framingGuide" class="absolute top-0 left-0 pointer-events-none"
+           width="0" height="0" viewBox="0 0 100 100" preserveAspectRatio="none">
+        <rect id="fgRect" x="5" y="5" width="90" height="90"
+              fill="none"
+              stroke="rgba(255,255,255,0.92)"
+              stroke-width="6"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              stroke-dasharray="22 18"/>
+      </svg>
     </div>
 
     <video id="videoFeed" playsinline></video>
@@ -81,7 +80,7 @@
       <input id="zoomRange" type="range" min="1" max="3" step="0.01" value="1" class="w-full">
     </div>
 
-    <!-- Résultats IA -->
+    <!-- Résultats IA (facultatif) -->
     <div id="aiOutputContainer" class="mt-4 text-left p-4 bg-gray-800 rounded-lg" style="display:none;">
       <p id="aiDescription" class="text-lg text-gray-300 italic"></p>
       <p id="aiPriceSuggestion" class="mt-3 text-lg text-cyan-400 font-semibold"></p>
@@ -116,19 +115,21 @@
     const video = document.getElementById('videoFeed');
     const canvas = document.getElementById('cameraCanvas');
     const ctx = canvas.getContext('2d', { willReadFrequently: true });
+
     const feedback = document.getElementById('feedback');
     const mainButton = document.getElementById('mainButton');
     const confirmContainer = document.getElementById('confirmContainer');
     const retakeButton = document.getElementById('retakeButton');
     const confirmButton = document.getElementById('confirmButton');
     const downloadButton = document.getElementById('downloadButton');
-    const framingGuideElement = document.getElementById('framingGuide');
     const zoomContainer = document.getElementById('zoomContainer');
     const zoomRange = document.getElementById('zoomRange');
 
-    let zoom = 1;
-    let finalImageDataUrl = null;
+    // SVG frame refs
+    const framingGuideSVG = document.getElementById('framingGuide');
+    const fgRect = document.getElementById('fgRect');
 
+    let zoom = 1;
     const AppState = { SCANNING: 'scanning', CONFIRMING: 'confirming', DONE: 'done' };
     let currentAppState = AppState.SCANNING;
 
@@ -170,19 +171,39 @@
       const w = canvas.width * widthFactor;
       const h = canvas.height * heightFactor;
       return {
-        width: w,
+        width:  w,
         height: h,
-        x: (canvas.width - w) / 2,
+        x: (canvas.width  - w) / 2,
         y: (canvas.height - h) / 2
       };
     }
 
+    // ✅ centre et dimensionne le SVG aux px CSS réels (pas d'écart à gauche)
     function updateFramingGuidePosition() {
       const frame = getFrameRect();
-      framingGuideElement.style.width = `${frame.width}px`;
-      framingGuideElement.style.height = `${frame.height}px`;
-      framingGuideElement.style.top = `${frame.y}px`;
-      framingGuideElement.style.transform = `translateX(-50%)`; // toujours centré
+      const box = canvas.getBoundingClientRect();
+      const sx = box.width  / canvas.width;
+      const sy = box.height / canvas.height;
+
+      const cssW = Math.round(frame.width  * sx);
+      const cssH = Math.round(frame.height * sy);
+      const cssX = Math.round(frame.x      * sx);
+      const cssY = Math.round(frame.y      * sy);
+
+      framingGuideSVG.style.width  = cssW + 'px';
+      framingGuideSVG.style.height = cssH + 'px';
+      framingGuideSVG.style.left   = cssX + 'px';
+      framingGuideSVG.style.top    = cssY + 'px';
+
+      // garder une épaisseur & des tirets élégants quelle que soit la taille
+      const stroke = Math.max(4, Math.round(Math.min(cssW, cssH) * 0.015));
+      fgRect.setAttribute('stroke-width', String(stroke));
+      fgRect.setAttribute('rx', String(Math.round(stroke * 2)));
+      fgRect.setAttribute('ry', String(Math.round(stroke * 2)));
+
+      const dash = Math.round(stroke * 3.6);
+      const gap  = Math.round(stroke * 3.0);
+      fgRect.setAttribute('stroke-dasharray', `${dash} ${gap}`);
     }
 
     function renderLoop() {
@@ -223,7 +244,7 @@
         ctx.clearRect(0, 0, frame.width, frame.height);
         ctx.drawImage(tempCanvas, 0, 0);
 
-        framingGuideElement.style.display = "none";
+        framingGuideSVG.style.display = "none";
       } else if (currentAppState === AppState.DONE) {
         resetApp();
       }
@@ -234,7 +255,7 @@
       confirmContainer.style.display = currentAppState === AppState.CONFIRMING ? 'flex' : 'none';
       downloadButton.style.display = currentAppState === AppState.DONE ? 'inline-block' : 'none';
       zoomContainer.style.display = currentAppState === AppState.SCANNING ? 'block' : 'none';
-      framingGuideElement.style.display = currentAppState === AppState.SCANNING ? 'block' : 'none';
+      framingGuideSVG.style.display = currentAppState === AppState.SCANNING ? 'block' : 'none';
 
       switch (currentAppState) {
         case AppState.SCANNING:
@@ -262,7 +283,7 @@
 
     function resetApp() {
       currentAppState = AppState.SCANNING;
-      framingGuideElement.style.display = "block";
+      framingGuideSVG.style.display = "block";
       setCanvasDimensions();
     }
 
