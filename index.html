@@ -7,25 +7,60 @@
   <script src="https://cdn.tailwindcss.com"></script>
   <link rel="stylesheet" href="https://rsms.me/inter/inter.css">
   <style>
-    body{
-      background:#111827;color:#F9FAFB;font-family:'Inter',sans-serif;
-      display:flex;justify-content:center;align-items:center;min-height:100vh;margin:0;overflow:auto;
+    body {
+      background: #111827;
+      color: #F9FAFB;
+      font-family: 'Inter', sans-serif;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      min-height: 100vh;
+      margin: 0;
+      overflow: auto;
     }
-    #cameraCanvas{
-      max-width:100%;max-height:60vh;border-radius:.75rem;
-      box-shadow:0 10px 15px -3px rgba(0,0,0,.1),0 4px 6px -2px rgba(0,0,0,.05);
-      background:#1f2937;
+    #cameraCanvas {
+      max-width: 100%;
+      max-height: 60vh;
+      border-radius: 0.75rem;
+      box-shadow: 0 10px 15px -3px rgba(0,0,0,0.1), 0 4px 6px -2px rgba(0,0,0,0.05);
+      background: #1f2937;
     }
-    #videoFeed{display:none;}
+    #videoFeed { display: none; }
 
-    /* Slider simple, sans chiffres */
-    input[type="range"]{-webkit-appearance:none;appearance:none;height:6px;background:#374151;border-radius:9999px;outline:none}
-    input[type="range"]::-webkit-slider-thumb{-webkit-appearance:none;width:22px;height:22px;border-radius:50%;background:#06b6d4;border:2px solid #0e7490;box-shadow:0 2px 6px rgba(0,0,0,.25)}
-    input[type="range"]::-moz-range-thumb{width:22px;height:22px;border-radius:50%;background:#06b6d4;border:2px solid #0e7490;box-shadow:0 2px 6px rgba(0,0,0,.25)}
+    /* Cadre pointillé simple sans point blanc */
+    #framingGuide {
+      border: 6px dashed rgba(255,255,255,0.9);
+      border-radius: 0.75rem;
+      pointer-events: none;
+      position: absolute;
+      top: 0;
+      left: 0;
+    }
 
-    /* Boutons: pas de chevauchement sur mobile */
-    @media (max-width: 420px){
-      #actionsContainer > *{ width:100%; }
+    /* Slider stylé */
+    input[type="range"] {
+      -webkit-appearance: none;
+      appearance: none;
+      height: 6px;
+      background: #374151;
+      border-radius: 9999px;
+      outline: none;
+    }
+    input[type="range"]::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      width: 22px;
+      height: 22px;
+      border-radius: 50%;
+      background: #06b6d4;
+      border: 2px solid #0e7490;
+      box-shadow: 0 2px 6px rgba(0,0,0,.25);
+    }
+
+    /* Boutons responsives */
+    @media (max-width: 480px) {
+      #actionsContainer > * {
+        width: 100%;
+      }
     }
   </style>
 </head>
@@ -37,33 +72,20 @@
 
     <div class="relative w-full">
       <canvas id="cameraCanvas" class="rounded-xl shadow-lg w-full"></canvas>
-
-      <!-- Cadre pointillé en SVG (pas de "point blanc" aux coins) -->
-      <svg id="framingGuide" class="absolute top-0 left-0 pointer-events-none"
-           width="0" height="0" viewBox="0 0 100 100" preserveAspectRatio="none">
-        <rect id="fgRect" x="4" y="4" width="92" height="92"
-              fill="none" stroke="rgba(255,255,255,0.9)"
-              stroke-width="6"
-              stroke-linecap="butt"       <!-- évite les points aux extrémités -->
-              stroke-linejoin="round"
-              stroke-dasharray="14 16"/>
-      </svg>
+      <div id="framingGuide"></div>
     </div>
 
     <video id="videoFeed" playsinline></video>
 
-    <!-- Slider de zoom (sans label/valeur) -->
     <div id="zoomContainer" class="mt-3 w-full max-w-lg" style="display:none;">
       <input id="zoomRange" type="range" min="1" max="3" step="0.01" value="1" class="w-full">
     </div>
 
-    <!-- Sortie IA -->
     <div id="aiOutputContainer" class="mt-4 text-left p-4 bg-gray-800 rounded-lg" style="display:none;">
       <p id="aiDescription" class="text-lg text-gray-300 italic"></p>
       <p id="aiPriceSuggestion" class="mt-3 text-lg text-cyan-400 font-semibold"></p>
     </div>
 
-    <!-- Actions (flex + wrap + gap pour éviter le chevauchement) -->
     <div id="actionsContainer" class="mt-6 flex flex-wrap gap-4 justify-center">
       <button id="mainButton"
         class="px-8 py-3 bg-cyan-600 text-white font-semibold rounded-lg shadow-md hover:bg-cyan-700 focus:outline-none focus:ring-2 focus:ring-cyan-500 transition-transform hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed">
@@ -92,45 +114,40 @@
     const video = document.getElementById('videoFeed');
     const canvas = document.getElementById('cameraCanvas');
     const ctx = canvas.getContext('2d', { willReadFrequently: true });
-    ctx.imageSmoothingEnabled = true;
-
     const feedback = document.getElementById('feedback');
     const mainButton = document.getElementById('mainButton');
     const confirmContainer = document.getElementById('confirmContainer');
     const retakeButton = document.getElementById('retakeButton');
     const confirmButton = document.getElementById('confirmButton');
+    const downloadButton = document.getElementById('downloadButton');
     const aiOutputContainer = document.getElementById('aiOutputContainer');
     const aiDescriptionContainer = document.getElementById('aiDescription');
     const aiPriceContainer = document.getElementById('aiPriceSuggestion');
-    const downloadButton = document.getElementById('downloadButton');
+    const framingGuideElement = document.getElementById('framingGuide');
     const zoomContainer = document.getElementById('zoomContainer');
     const zoomRange = document.getElementById('zoomRange');
 
-    // SVG frame
-    const framingGuideSVG = document.getElementById('framingGuide');
-    const fgRect = document.getElementById('fgRect');
-
+    let zoom = 1;
     let finalImageDataUrl = null;
-    let zoom = 1;                 // zoom logiciel
-    const ZOOM_MIN = 1, ZOOM_MAX = 3;
 
-    const AppState = { SCANNING:'scanning', CONFIRMING:'confirming', GENERATING:'generating', DONE:'done' };
+    const AppState = {
+      SCANNING: 'scanning',
+      CONFIRMING: 'confirming',
+      GENERATING: 'generating',
+      DONE: 'done'
+    };
     let currentAppState = AppState.SCANNING;
 
-    // --- Camera setup ---
     async function setupCamera() {
       try {
-        const stream = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode: { ideal: 'environment' } }, audio: false
-        });
+        const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
         video.srcObject = stream;
         video.onloadedmetadata = () => {
           video.play();
           setCanvasDimensions();
           requestAnimationFrame(renderLoop);
         };
-      } catch (e) {
-        console.error("Erreur caméra:", e);
+      } catch (error) {
         feedback.textContent = "Impossible d'accéder à la caméra.";
         mainButton.disabled = true;
       }
@@ -139,242 +156,138 @@
     function setCanvasDimensions() {
       if (!video.videoWidth) return;
       const aspect = video.videoWidth / video.videoHeight;
-      const containerW = canvas.parentElement.offsetWidth;
-      const maxH = window.innerHeight * 0.6;
-      let w = containerW, h = w / aspect;
-      if (h > maxH) { h = maxH; w = h * aspect; }
-      canvas.width = Math.round(w);
-      canvas.height = Math.round(h);
+      const containerWidth = canvas.parentElement.offsetWidth;
+      const maxHeight = window.innerHeight * 0.6;
+      let height = containerWidth / aspect;
+      let width = containerWidth;
+      if (height > maxHeight) {
+        height = maxHeight;
+        width = height * aspect;
+      }
+      canvas.width = width;
+      canvas.height = height;
       updateFramingGuidePosition();
     }
 
-    // --- Frame geometry (bigger & centered) ---
-    function getFrameRect() {
-      const portrait = canvas.height > canvas.width;
-      const widthFactor  = portrait ? 0.70 : 0.55;
-      const heightFactor = 0.80;
-      const w = canvas.width  * widthFactor;
-      const h = canvas.height * heightFactor;
-      return {
-        width:  w,
-        height: h,
-        x: (canvas.width  - w) / 2,
-        y: (canvas.height - h) / 2
-      };
-    }
-
-    // Position the SVG frame in CSS px, compute dash/stroke to avoid corner dots
-    function updateFramingGuidePosition() {
-      const frame = getFrameRect();
-      const bbox = canvas.getBoundingClientRect();
-      const sx = bbox.width / canvas.width;
-      const sy = bbox.height / canvas.height;
-
-      const cssW = Math.round(frame.width  * sx);
-      const cssH = Math.round(frame.height * sy);
-      const cssX = Math.round(frame.x      * sx);
-      const cssY = Math.round(frame.y      * sy);
-
-      // Size/position SVG container
-      framingGuideSVG.style.width  = cssW + 'px';
-      framingGuideSVG.style.height = cssH + 'px';
-      framingGuideSVG.style.left   = cssX + 'px';
-      framingGuideSVG.style.top    = cssY + 'px';
-
-      // Stroke proportional, dash tuned to avoid stray dots
-      const stroke = Math.max(4, Math.round(Math.min(cssW, cssH) * 0.015));
-      fgRect.setAttribute('stroke-width', String(stroke));
-      fgRect.setAttribute('rx', String(Math.round(stroke * 2)));
-      fgRect.setAttribute('ry', String(Math.round(stroke * 2)));
-
-      // dash pattern computed on perimeter to avoid leftover short segments
-      const perim = 2 * (92 + 92); // viewBox units
-      const dash  = Math.max(8, Math.round(stroke * 2.4));
-      const gap   = Math.max(10, Math.round(stroke * 2.8));
-      // ensure pattern repeats neatly
-      const repeat = Math.floor(perim / (dash + gap));
-      const adjustedGap = Math.max(6, Math.round((perim / repeat) - dash));
-      fgRect.setAttribute('stroke-dasharray', `${dash} ${adjustedGap}`);
-    }
-
-    // --- Render loop with software zoom ---
     function renderLoop() {
       if (currentAppState === AppState.SCANNING) {
-        if (video.videoWidth && video.videoHeight) {
-          const vW = video.videoWidth, vH = video.videoHeight;
-          const srcW = vW / zoom, srcH = vH / zoom;
-          const sx = (vW - srcW) / 2, sy = (vH - srcH) / 2;
-          ctx.drawImage(video, sx, sy, srcW, srcH, 0, 0, canvas.width, canvas.height);
-        } else {
-          ctx.clearRect(0, 0, canvas.width, canvas.height);
-        }
+        const vW = video.videoWidth;
+        const vH = video.videoHeight;
+        const srcW = vW / zoom;
+        const srcH = vH / zoom;
+        const sx = (vW - srcW) / 2;
+        const sy = (vH - srcH) / 2;
+        ctx.drawImage(video, sx, sy, srcW, srcH, 0, 0, canvas.width, canvas.height);
         updateFramingGuidePosition();
       }
       updateUI();
       requestAnimationFrame(renderLoop);
     }
 
-    function updateUI() {
-      aiOutputContainer.style.display = (currentAppState === AppState.GENERATING || currentAppState === AppState.DONE) ? 'block' : 'none';
-
-      // defaults
-      document.getElementById('actionsContainer').style.display = 'flex';
-      confirmContainer.style.display = 'none';
-      mainButton.style.display = 'inline-flex';
-      downloadButton.style.display = 'none';
-      zoomContainer.style.display = (currentAppState === AppState.SCANNING) ? 'block' : 'none';
-      framingGuideSVG.style.display = (currentAppState === AppState.SCANNING) ? 'block' : 'none';
-
-      switch (currentAppState) {
-        case AppState.SCANNING:
-          feedback.textContent = "Centrez le cadre et validez.";
-          mainButton.textContent = "Valider";
-          mainButton.disabled = false;
-          break;
-        case AppState.CONFIRMING:
-          feedback.textContent = "Validez-vous cette photo ?";
-          mainButton.style.display = 'none';
-          confirmContainer.style.display = 'flex';
-          break;
-        case AppState.GENERATING:
-          feedback.textContent = "✨ Analyse par l'IA en cours...";
-          mainButton.style.display = 'none';
-          break;
-        case AppState.DONE:
-          feedback.textContent = "Description générée !";
-          mainButton.textContent = "Recommencer";
-          mainButton.style.display = 'inline-flex';
-          mainButton.disabled = false;
-          downloadButton.style.display = 'inline-flex';
-          break;
-      }
+    function getFrameRect() {
+      const portrait = canvas.height > canvas.width;
+      const widthFactor = portrait ? 0.7 : 0.55;
+      const heightFactor = 0.8;
+      const w = canvas.width * widthFactor;
+      const h = canvas.height * heightFactor;
+      return {
+        width: w,
+        height: h,
+        x: (canvas.width - w) / 2,
+        y: (canvas.height - h) / 2
+      };
     }
 
-    // --- Capture: garder uniquement l'intérieur du cadre (recadrage strict) ---
+    function updateFramingGuidePosition() {
+      const frame = getFrameRect();
+      framingGuideElement.style.width = `${frame.width}px`;
+      framingGuideElement.style.height = `${frame.height}px`;
+      framingGuideElement.style.top = `${frame.y}px`;
+      framingGuideElement.style.left = `${frame.x}px`;
+    }
+
     function handleMainButtonClick() {
       if (currentAppState === AppState.SCANNING) {
         currentAppState = AppState.CONFIRMING;
 
         const frame = getFrameRect();
-
-        // créer un canvas du cadre
         const tempCanvas = document.createElement('canvas');
-        tempCanvas.width = Math.round(frame.width);
-        tempCanvas.height = Math.round(frame.height);
-        const tctx = tempCanvas.getContext('2d');
+        tempCanvas.width = frame.width;
+        tempCanvas.height = frame.height;
+        const tempCtx = tempCanvas.getContext('2d');
 
-        if (video.videoWidth && video.videoHeight) {
-          const vW = video.videoWidth, vH = video.videoHeight;
-          const srcW = vW / zoom, srcH = vH / zoom;
-          const sx = (vW - srcW) / 2, sy = (vH - srcH) / 2;
+        const vW = video.videoWidth;
+        const vH = video.videoHeight;
+        const srcW = vW / zoom;
+        const srcH = vH / zoom;
+        const sx = (vW - srcW) / 2;
+        const sy = (vH - srcH) / 2;
 
-          // Conversion zone cadre -> portion de la vidéo (en coordonnées source)
-          const cropX = sx + (frame.x / canvas.width) * srcW;
-          const cropY = sy + (frame.y / canvas.height) * srcH;
-          const cropW = (frame.width  / canvas.width)  * srcW;
-          const cropH = (frame.height / canvas.height) * srcH;
+        const cropX = sx + (frame.x / canvas.width) * srcW;
+        const cropY = sy + (frame.y / canvas.height) * srcH;
+        const cropW = (frame.width / canvas.width) * srcW;
+        const cropH = (frame.height / canvas.height) * srcH;
 
-          tctx.drawImage(video, cropX, cropY, cropW, cropH, 0, 0, tempCanvas.width, tempCanvas.height);
-        }
+        tempCtx.drawImage(video, cropX, cropY, cropW, cropH, 0, 0, frame.width, frame.height);
 
-        // Redimensionner le canvas principal à la taille du cadre
-        canvas.width = tempCanvas.width;
-        canvas.height = tempCanvas.height;
-
-        // Effacer et dessiner l'image recadrée uniquement
-        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        canvas.width = frame.width;
+        canvas.height = frame.height;
+        ctx.clearRect(0, 0, frame.width, frame.height);
         ctx.drawImage(tempCanvas, 0, 0);
 
-        // Masquer le cadre
-        framingGuideSVG.style.display = "none";
+        framingGuideElement.style.display = "none";
 
       } else if (currentAppState === AppState.DONE) {
         resetApp();
       }
     }
 
-    // --- Slider (sans valeur affichée) + Pinch-to-zoom logiciel ---
-    function clamp(v,min,max){ return Math.min(max, Math.max(min, v)); }
     zoomRange.addEventListener('input', () => {
-      zoom = clamp(Number(zoomRange.value), ZOOM_MIN, ZOOM_MAX);
+      zoom = Number(zoomRange.value);
     });
 
-    let pinchStartDist = null, pinchStartZoom = null;
-    function dist(t1,t2){ return Math.hypot(t1.pageX - t2.pageX, t1.pageY - t2.pageY); }
+    function updateUI() {
+      aiOutputContainer.style.display = (currentAppState === AppState.DONE) ? 'block' : 'none';
+      mainButton.style.display = (currentAppState === AppState.SCANNING || currentAppState === AppState.DONE) ? 'inline-block' : 'none';
+      confirmContainer.style.display = currentAppState === AppState.CONFIRMING ? 'flex' : 'none';
+      downloadButton.style.display = currentAppState === AppState.DONE ? 'inline-block' : 'none';
+      zoomContainer.style.display = currentAppState === AppState.SCANNING ? 'block' : 'none';
+      framingGuideElement.style.display = currentAppState === AppState.SCANNING ? 'block' : 'none';
 
-    canvas.addEventListener('touchstart', e=>{
-      if(e.touches.length===2){
-        e.preventDefault();
-        pinchStartDist = dist(e.touches[0], e.touches[1]);
-        pinchStartZoom = zoom;
+      switch (currentAppState) {
+        case AppState.SCANNING:
+          feedback.textContent = "Centrez le cadre et validez.";
+          break;
+        case AppState.CONFIRMING:
+          feedback.textContent = "Validez-vous cette photo ?";
+          break;
+        case AppState.DONE:
+          feedback.textContent = "Photo capturée !";
+          mainButton.textContent = "Recommencer";
+          break;
       }
-    }, {passive:false});
-
-    canvas.addEventListener('touchmove', e=>{
-      if(e.touches.length===2 && pinchStartDist){
-        e.preventDefault();
-        const factor = dist(e.touches[0], e.touches[1]) / pinchStartDist;
-        zoom = clamp(pinchStartZoom * factor, ZOOM_MIN, ZOOM_MAX);
-        zoomRange.value = String(zoom);
-      }
-    }, {passive:false});
-
-    canvas.addEventListener('touchend', e=>{
-      if(e.touches.length < 2) pinchStartDist = null;
-    });
-
-    // --- IA (laisse comme avant si tu l’utilises) ---
-    async function generateDescription() {
-      const frame = { x:0, y:0, width: canvas.width, height: canvas.height }; // après recadrage, tout le canvas = cadre
-      const tempCanvas = document.createElement('canvas');
-      tempCanvas.width = frame.width;
-      tempCanvas.height = frame.height;
-      const tempCtx = tempCanvas.getContext('2d');
-      tempCtx.drawImage(canvas, frame.x, frame.y, frame.width, frame.height, 0, 0, frame.width, frame.height);
-
-      const imageDataUrl = tempCanvas.toDataURL('image/jpeg');
-      finalImageDataUrl = imageDataUrl;
-
-      // ... ton appel IA si nécessaire ...
-      // aiDescriptionContainer.textContent = "...";
-      // aiPriceContainer.textContent = "...";
-      currentAppState = AppState.DONE;
     }
+
+    retakeButton.addEventListener('click', () => resetApp());
+    confirmButton.addEventListener('click', () => {
+      currentAppState = AppState.DONE;
+      updateUI();
+    });
+    downloadButton.addEventListener('click', () => {
+      const link = document.createElement('a');
+      link.href = canvas.toDataURL('image/jpeg');
+      link.download = 'snap-avec-novsuity.jpg';
+      link.click();
+    });
 
     function resetApp() {
       currentAppState = AppState.SCANNING;
-      aiDescriptionContainer.textContent = '';
-      aiPriceContainer.textContent = '';
-      finalImageDataUrl = null;
-      // On relance le flux et on redim le canvas à la taille vidéo
+      framingGuideElement.style.display = "block";
       setCanvasDimensions();
-      requestAnimationFrame(renderLoop);
     }
 
-    confirmButton.addEventListener('click', async () => {
-      if (currentAppState === AppState.CONFIRMING) {
-        currentAppState = AppState.GENERATING;
-        await generateDescription();
-      }
-    });
-    retakeButton.addEventListener('click', () => {
-      if (currentAppState === AppState.CONFIRMING) {
-        resetApp();
-      }
-    });
-    downloadButton.addEventListener('click', () => {
-      // si tu veux télécharger la photo recadrée (après DONE)
-      const dataUrl = canvas.toDataURL('image/jpeg');
-      const link = document.createElement('a');
-      link.href = dataUrl;
-      link.download = 'snap-avec-novsuity.jpg';
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-    });
-
     mainButton.addEventListener('click', handleMainButtonClick);
-    window.addEventListener('resize', () => { if (video.srcObject) setCanvasDimensions(); });
+    window.addEventListener('resize', setCanvasDimensions);
     window.addEventListener('load', setupCamera);
   </script>
 </body>
