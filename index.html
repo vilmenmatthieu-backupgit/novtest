@@ -27,9 +27,26 @@
     input[type="range"]{-webkit-appearance:none;appearance:none;height:6px;background:#374151;border-radius:9999px;outline:none}
     input[type="range"]::-webkit-slider-thumb{-webkit-appearance:none;width:22px;height:22px;border-radius:50%;background:#06b6d4;border:2px solid #0e7490;box-shadow:0 2px 6px rgba(0,0,0,.25)}
     input[type="range"]::-moz-range-thumb{width:22px;height:22px;border-radius:50%;background:#06b6d4;border:2px solid #0e7490;box-shadow:0 2px 6px rgba(0,0,0,.25)}
+
+    /* FLASH & COUNTDOWN (ajout) */
+    #flash{
+      position:fixed;inset:0;background:#fff;opacity:0;pointer-events:none;
+      transition:opacity .22s ease-out;z-index:50;
+    }
+    #countdown{
+      position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);
+      font-size:6rem;font-weight:800;color:#06b6d4;opacity:0;z-index:51;
+      user-select:none;transition:opacity .25s ease;
+      text-shadow:0 6px 20px rgba(0,0,0,.35);
+    }
   </style>
 </head>
 <body class="bg-gray-900 text-gray-100 flex flex-col justify-center items-center p-4">
+
+  <!-- Ajouts UI -->
+  <div id="flash"></div>
+  <div id="countdown"></div>
+
   <div class="w-full max-w-2xl text-center">
     <h1 class="text-3xl md:text-4xl font-bold mb-2">Snap avec NovSuity</h1>
     <p id="feedback" class="text-lg text-cyan-400 mb-4 h-8">Initialisation de la caméra...</p>
@@ -95,6 +112,8 @@
     const framingGuideElement = document.getElementById('framingGuide');
     const zoomContainer = document.getElementById('zoomContainer');
     const zoomRange = document.getElementById('zoomRange');
+    const flash = document.getElementById('flash');          // NEW
+    const countdown = document.getElementById('countdown');  // NEW
 
     let finalImageDataUrl = null;
     let zoom = 1;
@@ -225,45 +244,70 @@
       };
     }
 
-    // --- Capture stricte : on ne garde que l'intérieur du cadre (compatible zoom) ---
-    function handleMainButtonClick() {
-      if (currentAppState === AppState.SCANNING) {
-        currentAppState = AppState.CONFIRMING;
+    // --- Compte à rebours + flash (ajout) ---
+    function startCountdown() {
+      return new Promise(resolve=>{
+        let n = 3;
+        countdown.style.opacity = '1';
+        countdown.textContent = n;
+        const timer = setInterval(()=>{
+          n--;
+          if (n>0) {
+            countdown.textContent = n;
+          } else {
+            clearInterval(timer);
+            countdown.style.opacity = '0';
+            // petit délai pour laisser disparaître le chiffre
+            setTimeout(resolve, 200);
+          }
+        }, 800);
+      });
+    }
+    function doFlash() {
+      flash.style.opacity = '1';
+      setTimeout(()=>{ flash.style.opacity = '0'; }, 160);
+    }
 
-        const frame = getFrameRectInCanvasPx();
+    // --- Capture stricte (compatible zoom) + countdown/flash
+    async function handleMainButtonClick() {
+      if (currentAppState !== AppState.SCANNING) return;
 
-        // zone source affichée selon zoom
-        const vW = video.videoWidth, vH = video.videoHeight;
-        const srcW = vW / zoom,     srcH = vH / zoom;
-        const sx = (vW - srcW) / 2, sy = (vH - srcH) / 2;
+      // 1) Compte à rebours, 2) Flash, 3) Crop
+      await startCountdown();
+      doFlash();
 
-        // conversion cadre(canvas) -> source(video)
-        const cropX = sx + (frame.x      / canvas.width)  * srcW;
-        const cropY = sy + (frame.y      / canvas.height) * srcH;
-        const cropW =      (frame.width  / canvas.width)  * srcW;
-        const cropH =      (frame.height / canvas.height) * srcH;
+      currentAppState = AppState.CONFIRMING;
 
-        // sortie recadrée exactement à la taille du cadre
-        const out = document.createElement('canvas');
-        out.width  = Math.max(1, frame.width);
-        out.height = Math.max(1, frame.height);
-        const octx = out.getContext('2d');
-        octx.imageSmoothingEnabled = true;
-        octx.drawImage(video, cropX, cropY, cropW, cropH, 0, 0, out.width, out.height);
+      const frame = getFrameRectInCanvasPx();
 
-        // afficher l'image recadrée (tout ce qui est hors cadre disparaît)
-        canvas.width = out.width;
-        canvas.height = out.height;
-        ctx.clearRect(0, 0, canvas.width, canvas.height);
-        ctx.drawImage(out, 0, 0);
+      // zone source affichée selon zoom
+      const vW = video.videoWidth, vH = video.videoHeight;
+      const srcW = vW / zoom,     srcH = vH / zoom;
+      const sx = (vW - srcW) / 2, sy = (vH - srcH) / 2;
 
-        // masquer le cadre pendant la confirmation
-        framingGuideElement.style.display = 'none';
-        updateUI();
+      // conversion cadre(canvas) -> source(video)
+      const cropX = sx + (frame.x      / canvas.width)  * srcW;
+      const cropY = sy + (frame.y      / canvas.height) * srcH;
+      const cropW =      (frame.width  / canvas.width)  * srcW;
+      const cropH =      (frame.height / canvas.height) * srcH;
 
-      } else if (currentAppState === AppState.DONE) {
-        resetApp();
-      }
+      // sortie recadrée exactement à la taille du cadre
+      const out = document.createElement('canvas');
+      out.width  = Math.max(1, frame.width);
+      out.height = Math.max(1, frame.height);
+      const octx = out.getContext('2d');
+      octx.imageSmoothingEnabled = true;
+      octx.drawImage(video, cropX, cropY, cropW, cropH, 0, 0, out.width, out.height);
+
+      // afficher l'image recadrée
+      canvas.width = out.width;
+      canvas.height = out.height;
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      ctx.drawImage(out, 0, 0);
+
+      // masquer le cadre pendant la confirmation
+      framingGuideElement.style.display = 'none';
+      updateUI();
     }
 
     // Slider + pinch
