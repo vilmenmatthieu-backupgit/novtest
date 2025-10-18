@@ -21,6 +21,7 @@
     #framingGuide{
       position:absolute;top:0;left:0;border:6px dashed rgba(255,255,255,.9);
       border-radius:.75rem;pointer-events:none;box-sizing:border-box;
+      display:none; /* 🔧 caché par défaut pour éviter le "point blanc" */
     }
 
     /* Slider simple, sans chiffres */
@@ -112,8 +113,8 @@
     const framingGuideElement = document.getElementById('framingGuide');
     const zoomContainer = document.getElementById('zoomContainer');
     const zoomRange = document.getElementById('zoomRange');
-    const flash = document.getElementById('flash');          // NEW
-    const countdown = document.getElementById('countdown');  // NEW
+    const flash = document.getElementById('flash');
+    const countdown = document.getElementById('countdown');
 
     let finalImageDataUrl = null;
     let zoom = 1;
@@ -129,6 +130,8 @@
         video.onloadedmetadata = () => {
           video.play();
           setCanvasDimensions();
+          updateFramingGuidePosition();            // 🔧 calcule la taille du cadre avant affichage
+          framingGuideElement.style.display = 'block'; // 🔧 n'afficher qu'une fois prêt
           zoomContainer.style.display = 'block';
           requestAnimationFrame(renderLoop);
         };
@@ -136,6 +139,7 @@
         console.error("Erreur caméra:", e);
         feedback.textContent = "Impossible d'accéder à la caméra.";
         mainButton.disabled = true;
+        framingGuideElement.style.display = 'none'; // 🔧 rester caché si refus
       }
     }
 
@@ -172,7 +176,8 @@
       mainButton.style.display = (currentAppState === AppState.SCANNING || currentAppState === AppState.DONE) ? 'inline-block' : 'none';
       confirmContainer.style.display = currentAppState === AppState.CONFIRMING ? 'flex' : 'none';
       downloadButton.style.display = (currentAppState === AppState.DONE) ? 'inline-block' : 'none';
-      framingGuideElement.style.display = (currentAppState === AppState.SCANNING) ? 'block' : 'none';
+      // 🔧 n'affiche le cadre que si caméra active
+      framingGuideElement.style.display = (currentAppState === AppState.SCANNING && !!video.srcObject) ? 'block' : 'none';
       zoomContainer.style.display = (currentAppState === AppState.SCANNING) ? 'block' : 'none';
 
       switch (currentAppState) {
@@ -244,7 +249,7 @@
       };
     }
 
-    // --- Compte à rebours + flash (ajout) ---
+    // --- Compte à rebours + flash (déjà ajoutés) ---
     function startCountdown() {
       return new Promise(resolve=>{
         let n = 3;
@@ -252,14 +257,8 @@
         countdown.textContent = n;
         const timer = setInterval(()=>{
           n--;
-          if (n>0) {
-            countdown.textContent = n;
-          } else {
-            clearInterval(timer);
-            countdown.style.opacity = '0';
-            // petit délai pour laisser disparaître le chiffre
-            setTimeout(resolve, 200);
-          }
+          if (n>0) countdown.textContent = n;
+          else { clearInterval(timer); countdown.style.opacity = '0'; setTimeout(resolve, 200); }
         }, 800);
       });
     }
@@ -268,11 +267,10 @@
       setTimeout(()=>{ flash.style.opacity = '0'; }, 160);
     }
 
-    // --- Capture stricte (compatible zoom) + countdown/flash
+    // --- Capture stricte (compatible zoom)
     async function handleMainButtonClick() {
       if (currentAppState !== AppState.SCANNING) return;
 
-      // 1) Compte à rebours, 2) Flash, 3) Crop
       await startCountdown();
       doFlash();
 
@@ -280,18 +278,15 @@
 
       const frame = getFrameRectInCanvasPx();
 
-      // zone source affichée selon zoom
       const vW = video.videoWidth, vH = video.videoHeight;
       const srcW = vW / zoom,     srcH = vH / zoom;
       const sx = (vW - srcW) / 2, sy = (vH - srcH) / 2;
 
-      // conversion cadre(canvas) -> source(video)
       const cropX = sx + (frame.x      / canvas.width)  * srcW;
       const cropY = sy + (frame.y      / canvas.height) * srcH;
       const cropW =      (frame.width  / canvas.width)  * srcW;
       const cropH =      (frame.height / canvas.height) * srcH;
 
-      // sortie recadrée exactement à la taille du cadre
       const out = document.createElement('canvas');
       out.width  = Math.max(1, frame.width);
       out.height = Math.max(1, frame.height);
@@ -299,13 +294,11 @@
       octx.imageSmoothingEnabled = true;
       octx.drawImage(video, cropX, cropY, cropW, cropH, 0, 0, out.width, out.height);
 
-      // afficher l'image recadrée
       canvas.width = out.width;
       canvas.height = out.height;
       ctx.clearRect(0, 0, canvas.width, canvas.height);
       ctx.drawImage(out, 0, 0);
 
-      // masquer le cadre pendant la confirmation
       framingGuideElement.style.display = 'none';
       updateUI();
     }
@@ -319,11 +312,10 @@
     canvas.addEventListener('touchmove',e=>{ if(e.touches.length===2&&pinchStartDist){ e.preventDefault(); const f=dist(e.touches[0],e.touches[1])/pinchStartDist; zoom=clamp(pinchStartZoom*f,ZOOM_MIN,ZOOM_MAX); zoomRange.value=String(zoom);} },{passive:false});
     canvas.addEventListener('touchend',e=>{ if(e.touches.length<2) pinchStartDist=null; });
 
-    // (IA inchangé) — génère finalImageDataUrl puis passe à DONE
+    // (IA inchangé)
     async function generateDescription() {
-      const dataUrl = canvas.toDataURL('image/jpeg'); // après recadrage, tout le canvas = cadre
+      const dataUrl = canvas.toDataURL('image/jpeg');
       finalImageDataUrl = dataUrl;
-      // ... ton appel IA si besoin ...
       currentAppState = AppState.DONE;
       updateUI();
     }
