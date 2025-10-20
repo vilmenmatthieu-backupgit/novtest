@@ -21,7 +21,7 @@
     #framingGuide{
       position:absolute;top:0;left:0;border:6px dashed rgba(255,255,255,.9);
       border-radius:.75rem;pointer-events:none;box-sizing:border-box;
-      display:none; /* 🔧 caché par défaut pour éviter le "point blanc" */
+      display:none; /* caché par défaut pour éviter le "point blanc" */
     }
 
     /* Slider simple, sans chiffres */
@@ -29,7 +29,7 @@
     input[type="range"]::-webkit-slider-thumb{-webkit-appearance:none;width:22px;height:22px;border-radius:50%;background:#06b6d4;border:2px solid #0e7490;box-shadow:0 2px 6px rgba(0,0,0,.25)}
     input[type="range"]::-moz-range-thumb{width:22px;height:22px;border-radius:50%;background:#06b6d4;border:2px solid #0e7490;box-shadow:0 2px 6px rgba(0,0,0,.25)}
 
-    /* FLASH & COUNTDOWN (ajout) */
+    /* FLASH & COUNTDOWN */
     #flash{
       position:fixed;inset:0;background:#fff;opacity:0;pointer-events:none;
       transition:opacity .22s ease-out;z-index:50;
@@ -44,7 +44,7 @@
 </head>
 <body class="bg-gray-900 text-gray-100 flex flex-col justify-center items-center p-4">
 
-  <!-- Ajouts UI -->
+  <!-- UI -->
   <div id="flash"></div>
   <div id="countdown"></div>
 
@@ -59,25 +59,22 @@
 
     <video id="videoFeed" playsinline></video>
 
-    <!-- Slider de zoom (sans texte ni pourcentage) -->
     <div id="zoomContainer" class="mt-3 w-full max-w-lg" style="display:none;">
       <input id="zoomRange" type="range" min="1" max="3" step="0.01" value="1" class="w-full">
     </div>
 
-    <!-- Sortie IA -->
     <div id="aiOutputContainer" class="mt-4 text-left p-4 bg-gray-800 rounded-lg" style="display:none;">
       <p id="aiDescription" class="text-lg text-gray-300 italic"></p>
       <p id="aiPriceSuggestion" class="mt-3 text-lg text-cyan-400 font-semibold"></p>
     </div>
 
-    <!-- ✅ Conteneur d’actions flexible: pas de chevauchement sur mobile -->
+    <!-- ✅ Actions: flex-wrap pour mobile -->
     <div id="actionsContainer" class="mt-6 flex flex-wrap gap-4 justify-center">
       <button id="mainButton"
         class="w-full sm:w-auto px-8 py-3 bg-cyan-600 text-white font-semibold rounded-lg shadow-md hover:bg-cyan-700 focus:outline-none focus:ring-2 focus:ring-cyan-500 focus:ring-opacity-75 transition-transform hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed">
         Valider
       </button>
 
-      <!-- visible uniquement en CONFIRMING -->
       <div id="confirmContainer" class="hidden flex flex-wrap gap-4 justify-center">
         <button id="retakeButton"
           class="w-full sm:w-auto px-6 py-2 bg-gray-600 text-white font-semibold rounded-lg shadow-md hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-gray-500 transition-transform hover:scale-105">
@@ -89,10 +86,16 @@
         </button>
       </div>
 
-      <!-- visible uniquement en DONE -->
+      <!-- visible en DONE -->
       <button id="downloadButton"
         class="hidden w-full sm:w-auto px-8 py-3 bg-green-600 text-white font-semibold rounded-lg shadow-md hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-green-500 transition-transform hover:scale-105">
-        Télécharger la Photo
+        Télécharger la photo
+      </button>
+
+      <!-- 🆕 Option "Ajouter aux Photos (iOS/Android)" -->
+      <button id="saveToPhotosButton"
+        class="hidden w-full sm:w-auto px-8 py-3 bg-indigo-600 text-white font-semibold rounded-lg shadow-md hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-transform hover:scale-105">
+        Ajouter aux Photos (iOS/Android)
       </button>
     </div>
   </div>
@@ -110,6 +113,7 @@
     const aiDescriptionContainer = document.getElementById('aiDescription');
     const aiPriceContainer = document.getElementById('aiPriceSuggestion');
     const downloadButton = document.getElementById('downloadButton');
+    const saveToPhotosButton = document.getElementById('saveToPhotosButton'); // 🆕
     const framingGuideElement = document.getElementById('framingGuide');
     const zoomContainer = document.getElementById('zoomContainer');
     const zoomRange = document.getElementById('zoomRange');
@@ -130,8 +134,8 @@
         video.onloadedmetadata = () => {
           video.play();
           setCanvasDimensions();
-          updateFramingGuidePosition();            // 🔧 calcule la taille du cadre avant affichage
-          framingGuideElement.style.display = 'block'; // 🔧 n'afficher qu'une fois prêt
+          updateFramingGuidePosition();
+          framingGuideElement.style.display = 'block';
           zoomContainer.style.display = 'block';
           requestAnimationFrame(renderLoop);
         };
@@ -139,7 +143,7 @@
         console.error("Erreur caméra:", e);
         feedback.textContent = "Impossible d'accéder à la caméra.";
         mainButton.disabled = true;
-        framingGuideElement.style.display = 'none'; // 🔧 rester caché si refus
+        framingGuideElement.style.display = 'none';
       }
     }
 
@@ -175,8 +179,9 @@
       aiOutputContainer.style.display = (currentAppState === AppState.GENERATING || currentAppState === AppState.DONE) ? 'block' : 'none';
       mainButton.style.display = (currentAppState === AppState.SCANNING || currentAppState === AppState.DONE) ? 'inline-block' : 'none';
       confirmContainer.style.display = currentAppState === AppState.CONFIRMING ? 'flex' : 'none';
-      downloadButton.style.display = (currentAppState === AppState.DONE) ? 'inline-block' : 'none';
-      // 🔧 n'affiche le cadre que si caméra active
+      const showDoneButtons = (currentAppState === AppState.DONE);
+      downloadButton.style.display = showDoneButtons ? 'inline-block' : 'none';
+      saveToPhotosButton.style.display = showDoneButtons ? 'inline-block' : 'none'; // 🆕
       framingGuideElement.style.display = (currentAppState === AppState.SCANNING && !!video.srcObject) ? 'block' : 'none';
       zoomContainer.style.display = (currentAppState === AppState.SCANNING) ? 'block' : 'none';
 
@@ -193,14 +198,14 @@
           feedback.textContent = "✨ Analyse par l'IA en cours...";
           break;
         case AppState.DONE:
-          feedback.textContent = "Description générée !";
+          feedback.textContent = "Photo prête !";
           mainButton.textContent = "Recommencer";
           mainButton.disabled = false;
           break;
       }
     }
 
-    // --- Géométrie du cadre (inchangé visuellement) ---
+    // Géométrie du cadre
     function getFrameRect() {
       const portrait = canvas.height > canvas.width;
       const widthFactor  = portrait ? 0.70 : 0.55;
@@ -231,7 +236,6 @@
       el.style.borderRadius = Math.round(stroke * 2) + 'px';
     }
 
-    // --- Helper : cadre DOM -> coordonnées *canvas* px
     function getFrameRectInCanvasPx() {
       const frameBox  = framingGuideElement.getBoundingClientRect();
       const canvasBox = canvas.getBoundingClientRect();
@@ -249,7 +253,7 @@
       };
     }
 
-    // --- Compte à rebours + flash (déjà ajoutés) ---
+    // Compte à rebours + flash
     function startCountdown() {
       return new Promise(resolve=>{
         let n = 3;
@@ -267,7 +271,7 @@
       setTimeout(()=>{ flash.style.opacity = '0'; }, 160);
     }
 
-    // --- Capture stricte (compatible zoom)
+    // Capture stricte
     async function handleMainButtonClick() {
       if (currentAppState !== AppState.SCANNING) return;
 
@@ -303,6 +307,66 @@
       updateUI();
     }
 
+    // ---- Téléchargement classique
+    downloadButton.addEventListener('click', () => {
+      const url = canvas.toDataURL('image/jpeg');
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'snap-avec-novsuity.jpg';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+    });
+
+    // ---- 🆕 Ajouter aux Photos (iOS/Android) via Web Share + fallback
+    async function getCanvasBlob(type='image/jpeg', quality=0.92){
+      return new Promise(resolve=>{
+        if (canvas.toBlob) {
+          canvas.toBlob(b => resolve(b), type, quality);
+        } else {
+          // vieux Safari fallback
+          const dataUrl = canvas.toDataURL(type, quality);
+          fetch(dataUrl).then(r=>r.blob()).then(resolve);
+        }
+      });
+    }
+
+    saveToPhotosButton.addEventListener('click', async () => {
+      try {
+        const blob = await getCanvasBlob('image/jpeg', 0.92);
+        const file = new File([blob], 'snap-avec-novsuity.jpg', { type: 'image/jpeg' });
+
+        if (navigator.canShare && navigator.canShare({ files: [file] }) && navigator.share) {
+          await navigator.share({
+            files: [file],
+            title: 'Photo NovSuity',
+            text: 'Partage ou “Enregistrer l’image” pour l’ajouter à Photos.'
+          });
+          return;
+        }
+
+        // Fallback universel : ouvrir l’image dans un nouvel onglet
+        // (sur iOS Safari : appui long > “Ajouter à Photos”)
+        const url = URL.createObjectURL(blob);
+        const w = window.open(url, '_blank');
+        if (!w) {
+          // dernier recours : déclenche un téléchargement
+          const a = document.createElement('a');
+          a.href = url; a.download = 'snap-avec-novsuity.jpg';
+          document.body.appendChild(a); a.click(); a.remove();
+        }
+        // libérer l’URL après un petit délai
+        setTimeout(()=>URL.revokeObjectURL(url), 5000);
+      } catch (err) {
+        console.error('Partage/Photos error:', err);
+        // fallback téléchargement
+        const a = document.createElement('a');
+        a.href = canvas.toDataURL('image/jpeg');
+        a.download = 'snap-avec-novsuity.jpg';
+        document.body.appendChild(a); a.click(); a.remove();
+      }
+    });
+
     // Slider + pinch
     function clamp(v,min,max){ return Math.min(max, Math.max(min, v)); }
     zoomRange.addEventListener('input', () => { zoom = clamp(Number(zoomRange.value), ZOOM_MIN, ZOOM_MAX); });
@@ -312,10 +376,9 @@
     canvas.addEventListener('touchmove',e=>{ if(e.touches.length===2&&pinchStartDist){ e.preventDefault(); const f=dist(e.touches[0],e.touches[1])/pinchStartDist; zoom=clamp(pinchStartZoom*f,ZOOM_MIN,ZOOM_MAX); zoomRange.value=String(zoom);} },{passive:false});
     canvas.addEventListener('touchend',e=>{ if(e.touches.length<2) pinchStartDist=null; });
 
-    // (IA inchangé)
+    // (IA inchangé – non utilisée ici pour le partage)
     async function generateDescription() {
-      const dataUrl = canvas.toDataURL('image/jpeg');
-      finalImageDataUrl = dataUrl;
+      finalImageDataUrl = canvas.toDataURL('image/jpeg');
       currentAppState = AppState.DONE;
       updateUI();
     }
@@ -336,13 +399,12 @@
       }
     });
     retakeButton.addEventListener('click', () => { if (currentAppState === AppState.CONFIRMING) resetApp(); });
-    downloadButton.addEventListener('click', () => {
-      const url = finalImageDataUrl || canvas.toDataURL('image/jpeg');
-      const a = document.createElement('a'); a.href = url; a.download = 'snap-avec-novsuity.jpg';
-      document.body.appendChild(a); a.click(); a.remove();
-    });
 
+    // Capture
+    async function startCountdown(){ /* déjà défini plus haut */ }
+    function doFlash(){ /* déjà défini plus haut */ }
     mainButton.addEventListener('click', handleMainButtonClick);
+
     window.addEventListener('resize', () => { if (video.srcObject) setCanvasDimensions(); });
     window.addEventListener('load', setupCamera);
   </script>
