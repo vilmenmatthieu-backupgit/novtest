@@ -21,7 +21,7 @@
     #framingGuide{
       position:absolute;top:0;left:0;border:6px dashed rgba(255,255,255,.9);
       border-radius:.75rem;pointer-events:none;box-sizing:border-box;
-      display:none; /* caché par défaut pour éviter le "point blanc" */
+      display:none; /* évite le “point blanc” avant autorisation */
     }
 
     /* Slider simple, sans chiffres */
@@ -39,6 +39,13 @@
       font-size:6rem;font-weight:800;color:#06b6d4;opacity:0;z-index:51;
       user-select:none;transition:opacity .25s ease;
       text-shadow:0 6px 20px rgba(0,0,0,.35);
+    }
+    /* petit logo “Photos”-like (rosette) dans le bouton */
+    .photos-logo{
+      width:18px;height:18px;margin-right:.5rem;display:inline-block;
+      background: conic-gradient(#f43f5e, #f97316, #f59e0b, #22c55e, #06b6d4, #6366f1, #a855f7, #f43f5e);
+      border-radius:50%;
+      box-shadow:0 0 0 3px rgba(255,255,255,.15) inset;
     }
   </style>
 </head>
@@ -86,16 +93,11 @@
         </button>
       </div>
 
-      <!-- visible en DONE -->
-      <button id="downloadButton"
-        class="hidden w-full sm:w-auto px-8 py-3 bg-green-600 text-white font-semibold rounded-lg shadow-md hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-green-500 transition-transform hover:scale-105">
-        Télécharger la photo
-      </button>
-
-      <!-- 🆕 Option "Ajouter aux Photos (iOS/Android)" -->
+      <!-- 🆕 Seul bouton en DONE -->
       <button id="saveToPhotosButton"
-        class="hidden w-full sm:w-auto px-8 py-3 bg-indigo-600 text-white font-semibold rounded-lg shadow-md hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-transform hover:scale-105">
-        Ajouter aux Photos (iOS/Android)
+        class="hidden w-full sm:w-auto px-8 py-3 bg-indigo-600 text-white font-semibold rounded-lg shadow-md hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-transform hover:scale-105 flex items-center justify-center">
+        <span class="photos-logo" aria-hidden="true"></span>
+        Ajouter à la galerie Photos
       </button>
     </div>
   </div>
@@ -112,8 +114,7 @@
     const aiOutputContainer = document.getElementById('aiOutputContainer');
     const aiDescriptionContainer = document.getElementById('aiDescription');
     const aiPriceContainer = document.getElementById('aiPriceSuggestion');
-    const downloadButton = document.getElementById('downloadButton');
-    const saveToPhotosButton = document.getElementById('saveToPhotosButton'); // 🆕
+    const saveToPhotosButton = document.getElementById('saveToPhotosButton');
     const framingGuideElement = document.getElementById('framingGuide');
     const zoomContainer = document.getElementById('zoomContainer');
     const zoomRange = document.getElementById('zoomRange');
@@ -179,9 +180,10 @@
       aiOutputContainer.style.display = (currentAppState === AppState.GENERATING || currentAppState === AppState.DONE) ? 'block' : 'none';
       mainButton.style.display = (currentAppState === AppState.SCANNING || currentAppState === AppState.DONE) ? 'inline-block' : 'none';
       confirmContainer.style.display = currentAppState === AppState.CONFIRMING ? 'flex' : 'none';
+
       const showDoneButtons = (currentAppState === AppState.DONE);
-      downloadButton.style.display = showDoneButtons ? 'inline-block' : 'none';
-      saveToPhotosButton.style.display = showDoneButtons ? 'inline-block' : 'none'; // 🆕
+      saveToPhotosButton.style.display = showDoneButtons ? 'inline-flex' : 'none';
+
       framingGuideElement.style.display = (currentAppState === AppState.SCANNING && !!video.srcObject) ? 'block' : 'none';
       zoomContainer.style.display = (currentAppState === AppState.SCANNING) ? 'block' : 'none';
 
@@ -307,24 +309,12 @@
       updateUI();
     }
 
-    // ---- Téléchargement classique
-    downloadButton.addEventListener('click', () => {
-      const url = canvas.toDataURL('image/jpeg');
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = 'snap-avec-novsuity.jpg';
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-    });
-
-    // ---- 🆕 Ajouter aux Photos (iOS/Android) via Web Share + fallback
+    // ---- “Ajouter à la galerie Photos” (Web Share) + fallback sans téléchargement Drive/Fichiers
     async function getCanvasBlob(type='image/jpeg', quality=0.92){
       return new Promise(resolve=>{
         if (canvas.toBlob) {
           canvas.toBlob(b => resolve(b), type, quality);
         } else {
-          // vieux Safari fallback
           const dataUrl = canvas.toDataURL(type, quality);
           fetch(dataUrl).then(r=>r.blob()).then(resolve);
         }
@@ -340,30 +330,22 @@
           await navigator.share({
             files: [file],
             title: 'Photo NovSuity',
-            text: 'Partage ou “Enregistrer l’image” pour l’ajouter à Photos.'
+            text: 'Choisis “Enregistrer l’image” pour l’ajouter à Photos.'
           });
           return;
         }
 
-        // Fallback universel : ouvrir l’image dans un nouvel onglet
-        // (sur iOS Safari : appui long > “Ajouter à Photos”)
+        // Fallback : ouvrir l’image (iOS Safari : appui long → “Enregistrer l’image”)
         const url = URL.createObjectURL(blob);
-        const w = window.open(url, '_blank');
-        if (!w) {
-          // dernier recours : déclenche un téléchargement
-          const a = document.createElement('a');
-          a.href = url; a.download = 'snap-avec-novsuity.jpg';
-          document.body.appendChild(a); a.click(); a.remove();
+        const opened = window.open(url, '_blank');
+        if (!opened) {
+          // si popup bloquée: ouvrir dans l’onglet courant (iOS: appui long possible)
+          window.location.href = url;
         }
-        // libérer l’URL après un petit délai
         setTimeout(()=>URL.revokeObjectURL(url), 5000);
       } catch (err) {
         console.error('Partage/Photos error:', err);
-        // fallback téléchargement
-        const a = document.createElement('a');
-        a.href = canvas.toDataURL('image/jpeg');
-        a.download = 'snap-avec-novsuity.jpg';
-        document.body.appendChild(a); a.click(); a.remove();
+        // rien d’autre (on n’utilise pas de téléchargement fichiers/drive)
       }
     });
 
@@ -376,7 +358,6 @@
     canvas.addEventListener('touchmove',e=>{ if(e.touches.length===2&&pinchStartDist){ e.preventDefault(); const f=dist(e.touches[0],e.touches[1])/pinchStartDist; zoom=clamp(pinchStartZoom*f,ZOOM_MIN,ZOOM_MAX); zoomRange.value=String(zoom);} },{passive:false});
     canvas.addEventListener('touchend',e=>{ if(e.touches.length<2) pinchStartDist=null; });
 
-    // (IA inchangé – non utilisée ici pour le partage)
     async function generateDescription() {
       finalImageDataUrl = canvas.toDataURL('image/jpeg');
       currentAppState = AppState.DONE;
@@ -400,11 +381,7 @@
     });
     retakeButton.addEventListener('click', () => { if (currentAppState === AppState.CONFIRMING) resetApp(); });
 
-    // Capture
-    async function startCountdown(){ /* déjà défini plus haut */ }
-    function doFlash(){ /* déjà défini plus haut */ }
     mainButton.addEventListener('click', handleMainButtonClick);
-
     window.addEventListener('resize', () => { if (video.srcObject) setCanvasDimensions(); });
     window.addEventListener('load', setupCamera);
   </script>
