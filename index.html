@@ -335,7 +335,7 @@
           return;
         }
 
-        // Fallback : ouvrir l’image (iOS Safari : appui long → “Enregistrer l’image”)
+        // Fallback : ouvrir l’image (iOS Safari : appui long → “Enregistrer l’image”)/
         const url = URL.createObjectURL(blob);
         const opened = window.open(url, '_blank');
         if (!opened) {
